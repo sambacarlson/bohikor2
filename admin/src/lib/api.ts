@@ -18,6 +18,10 @@ api.interceptors.request.use(async (config) => {
   return config;
 });
 
+export interface ApiError {
+  error?: string;
+}
+
 api.interceptors.response.use(
   (response) => response,
   (error) => {
@@ -27,5 +31,14 @@ api.interceptors.response.use(
     return Promise.reject(error);
   }
 );
+
+export function getApiErrorMessage(error: unknown): string {
+  if (axios.isAxiosError(error)) {
+    const data = error.response?.data as ApiError | undefined;
+    if (data?.error) return data.error;
+    if (error.response?.status === 401) return "Session expired. Please log in again.";
+  }
+  return "Something went wrong. Please try again.";
+}
 
 export { api };
