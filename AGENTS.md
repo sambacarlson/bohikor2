@@ -127,6 +127,28 @@ Every PR must pass lint + typecheck + tests for the changed workspace(s).
 - Admin endpoints require Firebase Auth ID token via `firebase-admin-go`
 - Campay webhooks must be JWT-verified (HS256, signature in body) before processing
 
+## Deploy
+
+### Pre-push checklist
+
+Before pushing a backend change that touches Docker, build config, or migrations:
+
+1. **`docker build` locally** — run from repo root:
+   ```bash
+   docker build -f backend/Dockerfile -t bohikor2-test backend/
+   ```
+   Catches missing files, bad paths, or broken builds before Render fails.
+
+2. **Verify tracked files** — check that all needed files are tracked:
+   ```bash
+   git ls-files backend/db/sqlc/ backend/migrations/
+   ```
+   Generated code (`db/sqlc/`) must be committed, not gitignored. The `AGENTS.md` comment "do not edit" is convention — the files still need to exist in the build image.
+
+3. **Check runtime assets in the image** — any directory the binary reads at runtime (migrations, templates, static files) must be `COPY`ed into the Docker runtime stage. Multi-stage builds don't carry files forward automatically.
+
+4. **Audit `.gitignore`** — confirm it only excludes truly ephemeral files (`.env`, `node_modules`, binaries). Never exclude build-time dependencies (generated code, SQL files, config templates).
+
 ## Rules
 
 - **NEVER auto-commit changes.** Always wait for explicit user instruction to commit.
