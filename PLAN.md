@@ -9,6 +9,8 @@
 
 ## Epic 2: Request & Payout (Complete)
 
+**Also delivered: Client-facing web app** — phone login, request advance, transaction history, terms acceptance, and role-based access control, all within the existing Next.js admin app. Uses the same backend APIs built for mobile.
+
 ### Step-by-step implementation order:
 
 **1. Database — Add advance_requests table**
