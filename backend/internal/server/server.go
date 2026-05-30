@@ -26,7 +26,9 @@ import (
 	"github.com/Iknite-Space/bohikor2/internal/middleware"
 	"github.com/Iknite-Space/bohikor2/internal/repository"
 	"github.com/Iknite-Space/bohikor2/internal/service"
+	"github.com/Iknite-Space/bohikor2/internal/sms"
 	"github.com/Iknite-Space/bohikor2/internal/sms/africastalking"
+	"github.com/Iknite-Space/bohikor2/internal/sms/discord"
 )
 
 type Server struct {
@@ -60,12 +62,18 @@ func New(cfg *config.Config) (*Server, error) {
 
 	tokenService := authjwt.NewHS256Service(cfg.JWTSecret, cfg.JWTAccessExpiry)
 	hasher := authpassword.NewBcryptHasher()
-	smsSender := africastalking.NewClient(
-		cfg.AfricasTalkingAPIKey,
-		cfg.AfricasTalkingUsername,
-		cfg.AfricasTalkingSenderID,
-		cfg.AfricasTalkingBaseURL,
-	)
+	var smsSender sms.Sender
+	switch cfg.SMSProvider {
+	case "africastalking":
+		smsSender = africastalking.NewClient(
+			cfg.AfricasTalkingAPIKey,
+			cfg.AfricasTalkingUsername,
+			cfg.AfricasTalkingSenderID,
+			cfg.AfricasTalkingBaseURL,
+		)
+	default:
+		smsSender = discord.NewClient(cfg.DiscordWebhookURL, cfg.DiscordBotUsername)
+	}
 
 	emailClient := email.NewClient(cfg.ResendAPIKey, cfg.FromEmail)
 
