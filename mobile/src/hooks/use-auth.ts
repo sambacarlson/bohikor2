@@ -33,31 +33,10 @@ export function useVerifyEmailOTP() {
   });
 }
 
-export interface VerifyPhoneOTPResponse {
-  id: string;
-  email: string;
-  email_verified: boolean;
-  firebase_uid: string;
-  full_name: string | null;
-  phone_number: string;
-  phone_verified: boolean;
-  status: string;
-  is_terms_accepted: boolean;
-  terms_accepted_at: string | null;
-  terms_version: string | null;
-  user_ip_at_consent: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-export function useVerifyPhoneOTP() {
+export function useSendPhoneOTP() {
   return useMutation({
-    mutationFn: async ({ email, phoneNumber }: { email: string; phoneNumber: string }) => {
-      const { data } = await api.post<{ data: VerifyPhoneOTPResponse }>(
-        "/api/auth/verify-phone-otp",
-        { email, phone_number: phoneNumber }
-      );
-      return data.data;
+    mutationFn: async (phoneNumber: string) => {
+      await api.post("/api/auth/send-phone-otp", { phone_number: phoneNumber });
     },
   });
 }

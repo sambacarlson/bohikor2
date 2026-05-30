@@ -17,20 +17,20 @@ Please read these terms carefully before proceeding.`;
 export default function TermsScreen() {
   const [accepted, setAccepted] = useState(false);
   const router = useRouter();
-  const { backendUser, refreshBackendUser } = useAuth();
+  const { user, refreshUser } = useAuth();
   const acceptTerms = useAcceptTerms();
 
   const handleAccept = async () => {
     try {
       await acceptTerms.mutateAsync({ version: "v1" });
-      await refreshBackendUser();
+      await refreshUser();
       router.back();
     } catch {
       // Error is handled by the mutation state
     }
   };
 
-  if (backendUser?.is_terms_accepted) {
+  if (user?.is_terms_accepted) {
     return (
       <View className="flex-1 bg-primary-50 items-center justify-center px-6">
         <Text className="text-xl font-bold text-gray-900 mb-2">

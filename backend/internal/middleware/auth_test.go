@@ -8,31 +8,24 @@ import (
 	"testing"
 	"time"
 
-	"firebase.google.com/go/v4/auth"
 	"github.com/gin-gonic/gin"
+
+	"github.com/Iknite-Space/bohikor2/internal/authjwt"
 )
 
-type mockAuthClient struct {
-	token *auth.Token
-	err   error
-}
-
-func (m *mockAuthClient) VerifyIDToken(ctx context.Context, idToken string) (*auth.Token, error) {
-	return m.token, m.err
-}
-
-func setupTestRouter(authClient AuthVerifier) *gin.Engine {
+func setupTestRouter(svc authjwt.TokenService) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	r.Use(FirebaseAuth(authClient))
+	r.Use(JWTAuth(svc))
 	r.GET("/protected", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"uid": c.GetString("firebase_uid")})
+		c.JSON(http.StatusOK, gin.H{"subject_id": c.GetString("subject_id"), "subject_type": c.GetString("subject_type")})
 	})
 	return r
 }
 
-func TestFirebaseAuth_MissingHeader(t *testing.T) {
-	r := setupTestRouter(&mockAuthClient{})
+func TestJWTAuth_MissingHeader(t *testing.T) {
+	svc := authjwt.NewHS256Service("test-secret", 15*time.Minute)
+	r := setupTestRouter(svc)
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequestWithContext(context.Background(), "GET", "/protected", nil)
 	r.ServeHTTP(w, req)
@@ -50,10 +43,9 @@ func TestFirebaseAuth_MissingHeader(t *testing.T) {
 	}
 }
 
-func TestFirebaseAuth_InvalidToken(t *testing.T) {
-	r := setupTestRouter(&mockAuthClient{
-		err: context.DeadlineExceeded,
-	})
+func TestJWTAuth_InvalidToken(t *testing.T) {
+	svc := authjwt.NewHS256Service("test-secret", 15*time.Minute)
+	r := setupTestRouter(svc)
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequestWithContext(context.Background(), "GET", "/protected", nil)
 	req.Header.Set("Authorization", "Bearer invalid-token")
@@ -72,48 +64,35 @@ func TestFirebaseAuth_InvalidToken(t *testing.T) {
 	}
 }
 
-func TestFirebaseAuth_ExpiredSession(t *testing.T) {
-	thirtyOneDaysAgo := time.Now().Add(-31 * 24 * time.Hour).Unix()
-	r := setupTestRouter(&mockAuthClient{
-		token: &auth.Token{
-			UID:      "test-uid",
-			AuthTime: thirtyOneDaysAgo,
-			Claims:   map[string]interface{}{"email": "test@example.com"},
-		},
-	})
+func TestJWTAuth_ExpiredToken(t *testing.T) {
+	svc := authjwt.NewHS256Service("test-secret", -1*time.Second)
+	token, _ := svc.GenerateAccessToken("test-user-id", "user")
+	r := setupTestRouter(svc)
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequestWithContext(context.Background(), "GET", "/protected", nil)
-	req.Header.Set("Authorization", "Bearer valid-token")
+	req.Header.Set("Authorization", "Bearer "+token)
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d", w.Code)
 	}
 
-	var resp map[string]interface{}
+	var resp map[string]string
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to unmarshal response: %v", err)
 	}
-	if resp["error"] != "session_expired" {
-		t.Fatalf("expected session_expired error, got %v", resp["error"])
-	}
-	if resp["reauth_required"] != true {
-		t.Fatalf("expected reauth_required=true, got %v", resp["reauth_required"])
+	if resp["error"] != "invalid token" {
+		t.Fatalf("expected invalid token error, got %s", resp["error"])
 	}
 }
 
-func TestFirebaseAuth_ValidToken(t *testing.T) {
-	now := time.Now().Unix()
-	r := setupTestRouter(&mockAuthClient{
-		token: &auth.Token{
-			UID:      "test-uid",
-			AuthTime: now,
-			Claims:   map[string]interface{}{"email": "test@example.com"},
-		},
-	})
+func TestJWTAuth_ValidToken(t *testing.T) {
+	svc := authjwt.NewHS256Service("test-secret", 15*time.Minute)
+	token, _ := svc.GenerateAccessToken("test-user-id", "user")
+	r := setupTestRouter(svc)
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequestWithContext(context.Background(), "GET", "/protected", nil)
-	req.Header.Set("Authorization", "Bearer valid-token")
+	req.Header.Set("Authorization", "Bearer "+token)
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
@@ -124,7 +103,32 @@ func TestFirebaseAuth_ValidToken(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to unmarshal response: %v", err)
 	}
-	if resp["uid"] != "test-uid" {
-		t.Fatalf("expected test-uid, got %s", resp["uid"])
+	if resp["subject_id"] != "test-user-id" {
+		t.Fatalf("expected subject_id test-user-id, got %s", resp["subject_id"])
+	}
+	if resp["subject_type"] != "user" {
+		t.Fatalf("expected subject_type user, got %s", resp["subject_type"])
+	}
+}
+
+func TestJWTAdmin_TokenType(t *testing.T) {
+	svc := authjwt.NewHS256Service("test-secret", 15*time.Minute)
+	token, _ := svc.GenerateAccessToken("test-admin-id", "admin")
+	r := setupTestRouter(svc)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequestWithContext(context.Background(), "GET", "/protected", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	var resp map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+	if resp["subject_type"] != "admin" {
+		t.Fatalf("expected subject_type admin, got %s", resp["subject_type"])
 	}
 }

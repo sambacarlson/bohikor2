@@ -10,27 +10,18 @@ import (
 	"testing"
 	"time"
 
-	"firebase.google.com/go/v4/auth"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	db "github.com/Iknite-Space/bohikor2/db/sqlc"
+	"github.com/Iknite-Space/bohikor2/internal/authjwt"
 	"github.com/Iknite-Space/bohikor2/internal/handler"
 	"github.com/Iknite-Space/bohikor2/internal/middleware"
 	"github.com/Iknite-Space/bohikor2/internal/service"
 )
 
 var errNotFound = errors.New("not found")
-
-type testAuthVerifier struct {
-	token *auth.Token
-	err   error
-}
-
-func (v *testAuthVerifier) VerifyIDToken(ctx context.Context, idToken string) (*auth.Token, error) {
-	return v.token, v.err
-}
 
 type testQuerier struct {
 	admin    *db.Admin
@@ -39,7 +30,7 @@ type testQuerier struct {
 	userErr  error
 }
 
-func (q *testQuerier) GetAdminByFirebaseUID(ctx context.Context, firebaseUid string) (db.Admin, error) {
+func (q *testQuerier) GetAdminByID(ctx context.Context, id uuid.UUID) (db.Admin, error) {
 	if q.adminErr != nil {
 		return db.Admin{}, q.adminErr
 	}
@@ -49,7 +40,7 @@ func (q *testQuerier) GetAdminByFirebaseUID(ctx context.Context, firebaseUid str
 	return *q.admin, nil
 }
 
-func (q *testQuerier) GetUserByFirebaseUID(ctx context.Context, firebaseUid string) (db.User, error) {
+func (q *testQuerier) GetUserByID(ctx context.Context, id uuid.UUID) (db.User, error) {
 	if q.userErr != nil {
 		return db.User{}, q.userErr
 	}
@@ -57,6 +48,14 @@ func (q *testQuerier) GetUserByFirebaseUID(ctx context.Context, firebaseUid stri
 		return db.User{}, errNotFound
 	}
 	return *q.user, nil
+}
+
+func makeToken(svc authjwt.TokenService, subjectID, subjectType string) string {
+	token, err := svc.GenerateAccessToken(subjectID, subjectType)
+	if err != nil {
+		panic(err)
+	}
+	return token
 }
 
 func TestHealthHandler_NoAuth(t *testing.T) {
@@ -81,34 +80,18 @@ func TestHealthHandler_NoAuth(t *testing.T) {
 	}
 }
 
-func TestVerifyEndpoint_NoToken(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	r := gin.New()
-	r.Use(middleware.FirebaseAuth(&testAuthVerifier{}))
-	r.POST("/api/auth/verify", handleVerify(&testQuerier{}))
-
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequestWithContext(context.Background(), "POST", "/api/auth/verify", nil)
-	r.ServeHTTP(w, req)
-
-	if w.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401, got %d", w.Code)
-	}
-}
-
 func TestAdminMeEndpoint_NotAdmin(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	svc := authjwt.NewHS256Service("test-secret", 15*time.Minute)
+	token := makeToken(svc, uuid.New().String(), "user")
 	r := gin.New()
-	verifier := &testAuthVerifier{
-		token: &auth.Token{UID: "test-uid", AuthTime: time.Now().Unix()},
-	}
-	r.Use(middleware.FirebaseAuth(verifier))
+	r.Use(middleware.JWTAuth(svc))
 	r.Use(middleware.RequireAdmin(&testQuerier{}))
 	r.GET("/api/admin/me", handleAdminMe(&testQuerier{}))
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequestWithContext(context.Background(), "GET", "/api/admin/me", nil)
-	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("Authorization", "Bearer "+token)
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusForbidden {
@@ -118,17 +101,16 @@ func TestAdminMeEndpoint_NotAdmin(t *testing.T) {
 
 func TestUserMeEndpoint_UserNotFound(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	svc := authjwt.NewHS256Service("test-secret", 15*time.Minute)
+	token := makeToken(svc, uuid.New().String(), "user")
 	r := gin.New()
-	verifier := &testAuthVerifier{
-		token: &auth.Token{UID: "test-uid", AuthTime: time.Now().Unix()},
-	}
-	r.Use(middleware.FirebaseAuth(verifier))
+	r.Use(middleware.JWTAuth(svc))
 	r.Use(middleware.RequireActiveUser(&testQuerier{}))
 	r.GET("/api/users/me", handleUserMe(&testQuerier{}))
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequestWithContext(context.Background(), "GET", "/api/users/me", nil)
-	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("Authorization", "Bearer "+token)
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusNotFound {
@@ -138,23 +120,23 @@ func TestUserMeEndpoint_UserNotFound(t *testing.T) {
 
 func TestUserMeEndpoint_SuspendedUser(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	userID := uuid.New()
 	q := &testQuerier{
 		user: &db.User{
-			ID: uuid.New(), FirebaseUid: "test-uid",
+			ID:     userID,
 			Status: db.UserStatusSuspended,
 		},
 	}
-	verifier := &testAuthVerifier{
-		token: &auth.Token{UID: "test-uid", AuthTime: time.Now().Unix()},
-	}
+	svc := authjwt.NewHS256Service("test-secret", 15*time.Minute)
+	token := makeToken(svc, userID.String(), "user")
 	r := gin.New()
-	r.Use(middleware.FirebaseAuth(verifier))
+	r.Use(middleware.JWTAuth(svc))
 	r.Use(middleware.RequireActiveUser(q))
 	r.GET("/api/users/me", handleUserMe(q))
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequestWithContext(context.Background(), "GET", "/api/users/me", nil)
-	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("Authorization", "Bearer "+token)
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusForbidden {
@@ -167,21 +149,20 @@ func TestUserMeEndpoint_ActiveUser(t *testing.T) {
 	userID := uuid.New()
 	q := &testQuerier{
 		user: &db.User{
-			ID: userID, FirebaseUid: "test-uid", Email: "user@test.com",
+			ID: userID, Email: "user@test.com",
 			Status: db.UserStatusActive,
 		},
 	}
-	verifier := &testAuthVerifier{
-		token: &auth.Token{UID: "test-uid", AuthTime: time.Now().Unix()},
-	}
+	svc := authjwt.NewHS256Service("test-secret", 15*time.Minute)
+	token := makeToken(svc, userID.String(), "user")
 	r := gin.New()
-	r.Use(middleware.FirebaseAuth(verifier))
+	r.Use(middleware.JWTAuth(svc))
 	r.Use(middleware.RequireActiveUser(q))
 	r.GET("/api/users/me", handleUserMe(q))
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequestWithContext(context.Background(), "GET", "/api/users/me", nil)
-	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("Authorization", "Bearer "+token)
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
@@ -196,8 +177,8 @@ func TestUserMeEndpoint_ActiveUser(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected data object, got %v", resp["data"])
 	}
-	if data["firebase_uid"] != "test-uid" {
-		t.Fatalf("expected firebase_uid test-uid, got %v", data["firebase_uid"])
+	if data["id"] != userID.String() {
+		t.Fatalf("expected id %s, got %v", userID.String(), data["id"])
 	}
 }
 
@@ -259,14 +240,13 @@ func (m *mockEmailSender) SendInvitation(ctx context.Context, email string) erro
 func TestInviteEndpoint_AdminInvites(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	adminID := uuid.New()
-	verifier := &testAuthVerifier{
-		token: &auth.Token{UID: adminID.String(), AuthTime: time.Now().Unix()},
-	}
+	svc := authjwt.NewHS256Service("test-secret", 15*time.Minute)
+	token := makeToken(svc, adminID.String(), "admin")
 	adminQuerier := &testQuerier{
 		admin: &db.Admin{
-			ID:          uuid.New(),
-			Email:       "admin@example.com",
-			FirebaseUid: adminID.String(),
+			ID:           adminID,
+			Email:        "admin@example.com",
+			PasswordHash: "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy",
 		},
 	}
 	inviteStore := &mockInviteStore{
@@ -276,14 +256,14 @@ func TestInviteEndpoint_AdminInvites(t *testing.T) {
 	inviteSvc := service.NewInviteService(inviteStore, emailSender, adminQuerier)
 
 	r := gin.New()
-	r.Use(middleware.FirebaseAuth(verifier))
+	r.Use(middleware.JWTAuth(svc))
 	r.Use(middleware.RequireAdmin(adminQuerier))
 	r.POST("/api/admin/invite", handler.HandleInvite(inviteSvc))
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequestWithContext(context.Background(), "POST", "/api/admin/invite", strings.NewReader(`{"email":"newadmin@example.com"}`))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("Authorization", "Bearer "+token)
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusCreated {
@@ -306,14 +286,13 @@ func TestInviteEndpoint_AdminInvites(t *testing.T) {
 func TestInviteEndpoint_DuplicateInvitation(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	adminID := uuid.New()
-	verifier := &testAuthVerifier{
-		token: &auth.Token{UID: adminID.String(), AuthTime: time.Now().Unix()},
-	}
+	svc := authjwt.NewHS256Service("test-secret", 15*time.Minute)
+	token := makeToken(svc, adminID.String(), "admin")
 	adminQuerier := &testQuerier{
 		admin: &db.Admin{
-			ID:          uuid.New(),
-			Email:       "admin@example.com",
-			FirebaseUid: adminID.String(),
+			ID:           adminID,
+			Email:        "admin@example.com",
+			PasswordHash: "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy",
 		},
 	}
 	inviteStore := &mockInviteStore{
@@ -326,14 +305,14 @@ func TestInviteEndpoint_DuplicateInvitation(t *testing.T) {
 	inviteSvc := service.NewInviteService(inviteStore, &mockEmailSender{}, adminQuerier)
 
 	r := gin.New()
-	r.Use(middleware.FirebaseAuth(verifier))
+	r.Use(middleware.JWTAuth(svc))
 	r.Use(middleware.RequireAdmin(adminQuerier))
 	r.POST("/api/admin/invite", handler.HandleInvite(inviteSvc))
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequestWithContext(context.Background(), "POST", "/api/admin/invite", strings.NewReader(`{"email":"existing@example.com"}`))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("Authorization", "Bearer "+token)
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusConflict {

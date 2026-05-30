@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "expo-router";
 import {
   View,
@@ -10,26 +10,18 @@ import {
   Platform,
   ScrollView,
 } from "react-native";
-import { type FirebaseAuthTypes } from "@react-native-firebase/auth";
-import { auth } from "@/src/lib/firebase";
+import { api } from "@/src/lib/api";
+import { setTokens } from "@/src/lib/auth";
 import { useAuth } from "@/src/providers/auth-provider";
 
 export default function LoginScreen() {
   const router = useRouter();
-  const { firebaseUser } = useAuth();
-
-  useEffect(() => {
-    if (firebaseUser) {
-      router.replace("/(app)/home");
-    }
-  }, [firebaseUser]);
+  const { user } = useAuth();
 
   const [countryCode, setCountryCode] = useState("+237");
   const [loginPhone, setLoginPhone] = useState("");
   const [loginStep, setLoginStep] = useState<"phone" | "otp">("phone");
   const [loginOtp, setLoginOtp] = useState("");
-  const [confirmationResult, setConfirmationResult] =
-    useState<FirebaseAuthTypes.ConfirmationResult | null>(null);
   const [loginError, setLoginError] = useState("");
   const [sendingCode, setSendingCode] = useState(false);
   const [verifyingCode, setVerifyingCode] = useState(false);
@@ -37,7 +29,12 @@ export default function LoginScreen() {
   const fullPhone = `${countryCode}${loginPhone}`;
   const isValidPhone = (phone: string) => /^\+[1-9]\d{6,14}$/.test(phone);
 
-  const handleLoginSendCode = async () => {
+  if (user) {
+    router.replace("/(app)/home");
+    return null;
+  }
+
+  const handleSendCode = async () => {
     setLoginError("");
     if (!loginPhone.trim()) {
       setLoginError("Phone number is required");
@@ -49,41 +46,41 @@ export default function LoginScreen() {
     }
     setSendingCode(true);
     try {
-      const result = await auth.signInWithPhoneNumber(fullPhone);
-      setConfirmationResult(result);
+      await api.post("/api/auth/send-phone-otp", { phone_number: fullPhone });
       setLoginStep("otp");
     } catch (err: unknown) {
-      if (
-        err &&
-        typeof err === "object" &&
-        "code" in err &&
-        err.code === "auth/invalid-phone-number"
-      ) {
-        setLoginError("Invalid phone number. Please check and try again.");
+      if (err && typeof err === "object" && "response" in err && err.response && typeof err.response === "object" && "data" in err.response) {
+        const data = (err.response as { data?: { error?: string } }).data;
+        setLoginError(data?.error || "Failed to send verification code. Please try again.");
       } else {
-        setLoginError("Failed to send verification code. Please try again.");
+        setLoginError("Network error. Please check your connection and try again.");
       }
     } finally {
       setSendingCode(false);
     }
   };
 
-  const handleLoginVerify = async () => {
+  const handleVerifyCode = async () => {
     setLoginError("");
     if (loginOtp.length !== 6) {
       setLoginError("Please enter the full 6-digit code");
       return;
     }
-    if (!confirmationResult) {
-      setLoginError("No verification session found. Please try again.");
-      return;
-    }
     setVerifyingCode(true);
     try {
-      await confirmationResult.confirm(loginOtp);
+      const { data } = await api.post("/api/auth/verify-phone-otp", {
+        phone_number: fullPhone,
+        code: loginOtp,
+      });
+      await setTokens(data.data.access_token, data.data.refresh_token);
       router.replace("/(app)/home");
-    } catch {
-      setLoginError("Invalid code. Please try again.");
+    } catch (err: unknown) {
+      if (err && typeof err === "object" && "response" in err && err.response && typeof err.response === "object" && "data" in err.response) {
+        const data = (err.response as { data?: { error?: string } }).data;
+        setLoginError(data?.error || "Invalid code. Please try again.");
+      } else {
+        setLoginError("Network error. Please try again.");
+      }
       setLoginOtp("");
     } finally {
       setVerifyingCode(false);
@@ -97,7 +94,7 @@ export default function LoginScreen() {
     >
       <ScrollView contentContainerClassName="flex-1 justify-center px-6">
         <View className="items-center mb-8">
-          <Text className="text-3xl font-bold text-gray-900">Bohikor2</Text>
+          <Text className="text-3xl font-bold text-gray-900">Bohikor</Text>
           <Text className="text-gray-500 mt-2 text-center text-lg">
             Salary Advance
           </Text>
@@ -139,7 +136,7 @@ export default function LoginScreen() {
                 className={`mt-6 rounded-xl py-4 items-center flex-row justify-center ${
                   loginPhone.trim() ? "bg-primary-600" : "bg-primary-300"
                 }`}
-                onPress={handleLoginSendCode}
+                onPress={handleSendCode}
                 disabled={!loginPhone.trim() || sendingCode}
               >
                 {sendingCode ? (
@@ -157,7 +154,10 @@ export default function LoginScreen() {
                 Verification Code
               </Text>
               <Text className="text-gray-500 text-base mb-3">
-                We sent a 6-digit code to {fullPhone}
+                We sent a 6-digit code to{"\n"}
+                <Text className="font-medium text-gray-700 text-lg">
+                  {fullPhone}
+                </Text>
               </Text>
               <TextInput
                 className="border border-gray-300 rounded-lg px-4 py-4 text-lg text-center tracking-widest"
@@ -178,14 +178,14 @@ export default function LoginScreen() {
                 className={`mt-6 rounded-xl py-4 items-center flex-row justify-center ${
                   loginOtp.length === 6 ? "bg-primary-600" : "bg-primary-300"
                 }`}
-                onPress={handleLoginVerify}
+                onPress={handleVerifyCode}
                 disabled={loginOtp.length !== 6 || verifyingCode}
               >
                 {verifyingCode ? (
                   <ActivityIndicator color="white" />
                 ) : (
-                  <Text className="text-white font-bold text-lg">
-                    Verify
+                  <Text className="text-white font-semibold text-lg">
+                    Verify & Continue
                   </Text>
                 )}
               </TouchableOpacity>

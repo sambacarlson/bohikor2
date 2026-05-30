@@ -8,7 +8,6 @@ export interface User {
   id: string;
   email: string;
   email_verified: boolean;
-  firebase_uid: string;
   full_name: string | null;
   phone_number: string;
   phone_verified: boolean;
@@ -40,4 +39,25 @@ export interface AdvanceRequest {
   payout_duration_seconds: number | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface AuthResponse {
+  user: User;
+  access_token: string;
+  refresh_token: string;
+  expires_in: number;
+}
+
+export interface AdminAuthResponse {
+  admin: Admin;
+  access_token: string;
+  refresh_token: string;
+  expires_in: number;
+}
+
+export interface Admin {
+  id: string;
+  email: string;
+  password_hash: string;
+  created_at: string;
 }

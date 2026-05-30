@@ -16,25 +16,24 @@ import (
 	"github.com/shopspring/decimal"
 
 	db "github.com/Iknite-Space/bohikor2/db/sqlc"
+	"github.com/Iknite-Space/bohikor2/internal/authjwt"
+	"github.com/Iknite-Space/bohikor2/internal/authpassword"
 	"github.com/Iknite-Space/bohikor2/internal/campay"
 	"github.com/Iknite-Space/bohikor2/internal/config"
 	"github.com/Iknite-Space/bohikor2/internal/database"
 	"github.com/Iknite-Space/bohikor2/internal/email"
-	"github.com/Iknite-Space/bohikor2/internal/firebaseapp"
 	"github.com/Iknite-Space/bohikor2/internal/handler"
 	"github.com/Iknite-Space/bohikor2/internal/middleware"
 	"github.com/Iknite-Space/bohikor2/internal/repository"
 	"github.com/Iknite-Space/bohikor2/internal/service"
+	"github.com/Iknite-Space/bohikor2/internal/sms/africastalking"
 )
 
 type Server struct {
-	cfg      *config.Config
-	router   *gin.Engine
-	http     *http.Server
-	pool     *pgxpool.Pool
-	queries  *db.Queries
-	firebase *firebaseapp.Client
-	email    *email.Client
+	cfg    *config.Config
+	router *gin.Engine
+	http   *http.Server
+	pool   *pgxpool.Pool
 }
 
 func New(cfg *config.Config) (*Server, error) {
@@ -57,15 +56,18 @@ func New(cfg *config.Config) (*Server, error) {
 		return nil, fmt.Errorf("run migrations: %w", err)
 	}
 
-	fb, err := firebaseapp.NewClient(ctx, cfg.FirebaseCredentialsJSON, cfg.FirebaseProjectID)
-	if err != nil {
-		pool.Close()
-		return nil, fmt.Errorf("initialize firebase: %w", err)
-	}
+	queries := db.New(pool)
+
+	tokenService := authjwt.NewHS256Service(cfg.JWTSecret, cfg.JWTAccessExpiry)
+	hasher := authpassword.NewBcryptHasher()
+	smsSender := africastalking.NewClient(
+		cfg.AfricasTalkingAPIKey,
+		cfg.AfricasTalkingUsername,
+		cfg.AfricasTalkingSenderID,
+		cfg.AfricasTalkingBaseURL,
+	)
 
 	emailClient := email.NewClient(cfg.ResendAPIKey, cfg.FromEmail)
-
-	queries := db.New(pool)
 
 	campayClient := campay.NewClient(
 		cfg.CampayPermanentAccessToken,
@@ -88,29 +90,33 @@ func New(cfg *config.Config) (*Server, error) {
 		AllowCredentials: false,
 	}))
 
-	authMiddleware := middleware.FirebaseAuth(fb.Auth)
+	authMiddleware := middleware.JWTAuth(tokenService)
 
-	// Public routes (no auth required)
+	// Public routes
 	router.GET("/health", healthHandler)
 
-	// Mobile auth routes (public - no Firebase auth required)
-	authHandler := handler.NewAuthHandler(queries, emailClient)
+	authHandler := handler.NewAuthHandler(
+		queries, tokenService, hasher, smsSender, 30*24*time.Hour,
+	)
 	authGroup := router.Group("/api/auth")
 	{
 		authGroup.GET("/check-invite", authHandler.CheckInvitation)
 		authGroup.POST("/send-email-otp", authHandler.SendEmailOTP)
 		authGroup.POST("/verify-email-otp", authHandler.VerifyEmailOTP)
-		authGroup.POST("/verify-phone-otp", authMiddleware, authHandler.VerifyPhoneOTP)
+		authGroup.POST("/send-phone-otp", authHandler.SendPhoneOTP)
+		authGroup.POST("/verify-phone-otp", authHandler.VerifyPhoneOTP)
+		authGroup.POST("/admin/login", authHandler.AdminLogin)
+		authGroup.POST("/refresh", authHandler.RefreshToken)
 	}
 
-	// Auth routes (protected by Firebase auth middleware)
+	// Auth-protected routes
 	authProtected := router.Group("/api/auth")
 	authProtected.Use(authMiddleware)
 	{
-		authProtected.POST("/verify", handleVerify(queries))
+		authProtected.POST("/logout", authHandler.Logout)
 	}
 
-	// Admin routes (protected by Firebase auth + admin role)
+	// Admin routes
 	adminGroup := router.Group("/api/admin")
 	adminGroup.Use(authMiddleware)
 	adminGroup.Use(middleware.RequireAdmin(queries))
@@ -122,7 +128,7 @@ func New(cfg *config.Config) (*Server, error) {
 		adminGroup.GET("/events", handler.HandleListEvents(queries))
 	}
 
-	// User routes (protected by Firebase auth + active user check)
+	// User routes
 	userGroup := router.Group("/api/users")
 	userGroup.Use(authMiddleware)
 	userGroup.Use(middleware.RequireActiveUser(queries))
@@ -131,7 +137,7 @@ func New(cfg *config.Config) (*Server, error) {
 		userGroup.PUT("/terms", handler.HandleAcceptTerms(queries))
 	}
 
-	// Advance request routes (protected by Firebase auth + active user check)
+	// Advance request routes
 	advanceHandler := handler.NewAdvanceHandler(queries, campayClient, decimal.NewFromInt(10000))
 	advanceGroup := router.Group("/api/advance-requests")
 	advanceGroup.Use(authMiddleware)
@@ -149,17 +155,14 @@ func New(cfg *config.Config) (*Server, error) {
 		adminAdvanceGroup.GET("", handler.HandleListAdminRequests(queries))
 	}
 
-	// Webhook routes (public - HMAC verified)
+	// Webhook routes (public - JWT verified)
 	webhookHandler := handler.NewWebhookHandler(queries, campayClient)
 	router.POST("/api/webhooks/campay", webhookHandler.HandleCampayWebhook)
 
 	s := &Server{
-		cfg:      cfg,
-		router:   router,
-		pool:     pool,
-		queries:  queries,
-		firebase: fb,
-		email:    emailClient,
+		cfg:    cfg,
+		router: router,
+		pool:   pool,
 	}
 
 	s.http = &http.Server{

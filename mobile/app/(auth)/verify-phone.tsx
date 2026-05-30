@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useState } from "react";
+import { useRouter, useLocalSearchParams } from "expo-router";
 import {
   View,
   Text,
@@ -10,114 +10,74 @@ import {
   Platform,
   ScrollView,
 } from "react-native";
-import { type FirebaseAuthTypes } from "@react-native-firebase/auth";
-import { auth } from "@/src/lib/firebase";
-import { useAuth } from "@/src/providers/auth-provider";
-import { useVerifyPhoneOTP } from "@/src/hooks/use-auth";
+import { api } from "@/src/lib/api";
+import { setTokens } from "@/src/lib/auth";
 
 export default function VerifyPhoneScreen() {
   const router = useRouter();
-  const { firebaseUser } = useAuth();
   const { email } = useLocalSearchParams<{ email: string }>();
 
-  useEffect(() => {
-    if (firebaseUser) {
-      router.replace("/(app)/home");
-    }
-  }, [firebaseUser]);
   const [countryCode, setCountryCode] = useState("+237");
   const [phoneNumber, setPhoneNumber] = useState("");
   const [otpCode, setOtpCode] = useState("");
   const [step, setStep] = useState<"phone" | "otp">("phone");
   const [error, setError] = useState("");
-  const [confirmationResult, setConfirmationResult] =
-    useState<FirebaseAuthTypes.ConfirmationResult | null>(null);
-  const [sendingFirebase, setSendingFirebase] = useState(false);
-  const [verifyingFirebase, setVerifyingFirebase] = useState(false);
-
-  const verifyPhoneOTP = useVerifyPhoneOTP();
+  const [sending, setSending] = useState(false);
+  const [verifying, setVerifying] = useState(false);
 
   const fullPhone = `${countryCode}${phoneNumber}`;
-  const isValidPhone = (phone: string) => {
-    return /^\+[1-9]\d{6,14}$/.test(phone);
-  };
+  const isValidPhone = (phone: string) => /^\+[1-9]\d{6,14}$/.test(phone);
 
   const handleSendCode = async () => {
     setError("");
-
     if (!phoneNumber.trim()) {
       setError("Phone number is required");
       return;
     }
-
     if (!isValidPhone(fullPhone)) {
       setError("Enter a valid phone number with country code (e.g., +237 6XXXXXXXX)");
       return;
     }
-
-    setSendingFirebase(true);
+    setSending(true);
     try {
-      const result = await auth.signInWithPhoneNumber(fullPhone);
-      setConfirmationResult(result);
+      await api.post("/api/auth/send-phone-otp", { phone_number: fullPhone });
       setStep("otp");
     } catch (err: unknown) {
-      if (
-        err &&
-        typeof err === "object" &&
-        "code" in err &&
-        err.code === "auth/invalid-phone-number"
-      ) {
-        setError("Invalid phone number. Please check and try again.");
+      if (err && typeof err === "object" && "response" in err && err.response && typeof err.response === "object" && "data" in err.response) {
+        const data = (err.response as { data?: { error?: string } }).data;
+        setError(data?.error || "Failed to send verification code.");
       } else {
-        setError("Failed to send verification code. Please try again.");
+        setError("Network error. Please try again.");
       }
     } finally {
-      setSendingFirebase(false);
+      setSending(false);
     }
   };
 
   const handleVerifyOTP = async () => {
     setError("");
-
     if (otpCode.length !== 6) {
       setError("Please enter the full 6-digit code");
       return;
     }
-
-    if (!confirmationResult) {
-      setError("No verification session found. Please try again.");
-      return;
-    }
-
-    setVerifyingFirebase(true);
+    setVerifying(true);
     try {
-      await confirmationResult.confirm(otpCode);
-    } catch {
-      setError("Invalid code. Please try again.");
-      setOtpCode("");
-      setVerifyingFirebase(false);
-      return;
-    }
-    setVerifyingFirebase(false);
-
-    try {
-      await verifyPhoneOTP.mutateAsync({ email, phoneNumber: fullPhone });
+      const { data } = await api.post("/api/auth/verify-phone-otp", {
+        phone_number: fullPhone,
+        code: otpCode,
+        email,
+      });
+      await setTokens(data.data.access_token, data.data.refresh_token);
       router.replace("/(app)/home");
     } catch (err: unknown) {
-      console.log("err2=====: ", err);
-      if (
-        err &&
-        typeof err === "object" &&
-        "response" in err &&
-        err.response &&
-        typeof err.response === "object" &&
-        "data" in err.response
-      ) {
+      if (err && typeof err === "object" && "response" in err && err.response && typeof err.response === "object" && "data" in err.response) {
         const data = (err.response as { data?: { error?: string } }).data;
         setError(data?.error || "Failed to complete signup. Please try again.");
       } else {
         setError("Network error. Please try again.");
       }
+    } finally {
+      setVerifying(false);
     }
   };
 
@@ -170,12 +130,13 @@ export default function VerifyPhoneScreen() {
               ) : null}
 
               <TouchableOpacity
-                className={`mt-6 rounded-xl py-4 items-center flex-row justify-center ${verifyPhoneOTP.isPending || sendingFirebase ? "bg-primary-300" : "bg-primary-600"
-                  }`}
+                className={`mt-6 rounded-xl py-4 items-center flex-row justify-center ${
+                  sending ? "bg-primary-300" : "bg-primary-600"
+                }`}
                 onPress={handleSendCode}
-                disabled={verifyPhoneOTP.isPending || sendingFirebase}
+                disabled={sending}
               >
-                {verifyPhoneOTP.isPending || sendingFirebase ? (
+                {sending ? (
                   <ActivityIndicator color="white" />
                 ) : (
                   <Text className="text-white font-bold text-lg">
@@ -221,15 +182,16 @@ export default function VerifyPhoneScreen() {
               ) : null}
 
               <TouchableOpacity
-                className={`mt-6 rounded-xl py-4 items-center flex-row justify-center ${verifyPhoneOTP.isPending || verifyingFirebase ? "bg-primary-300" : "bg-primary-600"
-                  }`}
+                className={`mt-6 rounded-xl py-4 items-center flex-row justify-center ${
+                  verifying ? "bg-primary-300" : "bg-primary-600"
+                }`}
                 onPress={handleVerifyOTP}
-                disabled={verifyPhoneOTP.isPending || verifyingFirebase || otpCode.length !== 6}
+                disabled={verifying}
               >
-                {verifyPhoneOTP.isPending || verifyingFirebase ? (
+                {verifying ? (
                   <ActivityIndicator color="white" />
                 ) : (
-                  <Text className="text-white font-bold text-lg">
+                  <Text className="text-white font-semibold text-lg">
                     Verify & Continue
                   </Text>
                 )}

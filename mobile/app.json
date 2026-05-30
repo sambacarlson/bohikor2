@@ -14,8 +14,7 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.bohikor2.mobile",
-      "googleServicesFile": "GoogleService-Info.plist"
+      "bundleIdentifier": "com.bohikor2.mobile"
     },
     "android": {
       "adaptiveIcon": {
@@ -24,8 +23,7 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.bohikor2.mobile",
-      "googleServicesFile": "google-services.json"
+      "package": "com.bohikor2.mobile"
     },
     "web": {
       "favicon": "./assets/favicon.png",
@@ -35,12 +33,6 @@
     "plugins": [
       "expo-router",
       "expo-font",
-      [
-        "@react-native-firebase/app",
-        {
-          "googleServicesFile": "GoogleService-Info.plist"
-        }
-      ],
       [
         "expo-build-properties",
         {

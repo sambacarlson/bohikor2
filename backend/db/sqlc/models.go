@@ -147,10 +147,10 @@ func (ns NullUserStatus) Value() (driver.Value, error) {
 }
 
 type Admin struct {
-	ID          uuid.UUID `json:"id"`
-	Email       string    `json:"email"`
-	FirebaseUid string    `json:"firebase_uid"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID           uuid.UUID `json:"id"`
+	Email        string    `json:"email"`
+	CreatedAt    time.Time `json:"created_at"`
+	PasswordHash string    `json:"password_hash"`
 }
 
 type AdvanceRequest struct {
@@ -192,11 +192,27 @@ type Invitation struct {
 	UpdatedAt  time.Time        `json:"updated_at"`
 }
 
+type PhoneOtp struct {
+	ID          uuid.UUID `json:"id"`
+	PhoneNumber string    `json:"phone_number"`
+	Code        string    `json:"code"`
+	ExpiresAt   time.Time `json:"expires_at"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+type RefreshToken struct {
+	ID          uuid.UUID `json:"id"`
+	TokenHash   string    `json:"token_hash"`
+	SubjectID   uuid.UUID `json:"subject_id"`
+	SubjectType string    `json:"subject_type"`
+	ExpiresAt   time.Time `json:"expires_at"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
 type User struct {
 	ID              uuid.UUID    `json:"id"`
 	Email           string       `json:"email"`
 	EmailVerified   bool         `json:"email_verified"`
-	FirebaseUid     string       `json:"firebase_uid"`
 	FullName        pgtype.Text  `json:"full_name"`
 	PhoneNumber     string       `json:"phone_number"`
 	PhoneVerified   bool         `json:"phone_verified"`

@@ -19,7 +19,7 @@ import (
 )
 
 type advanceQuerier interface {
-	GetUserByFirebaseUID(ctx context.Context, firebaseUid string) (db.User, error)
+	GetUserByID(ctx context.Context, id uuid.UUID) (db.User, error)
 	GetActiveRequestByUserID(ctx context.Context, userID uuid.UUID) (db.AdvanceRequest, error)
 	CreateAdvanceRequest(ctx context.Context, arg db.CreateAdvanceRequestParams) (db.AdvanceRequest, error)
 	UpdateAdvanceRequestStatus(ctx context.Context, arg db.UpdateAdvanceRequestStatusParams) (db.AdvanceRequest, error)
@@ -73,7 +73,7 @@ func (h *AdvanceHandler) CreateRequest(c *gin.Context) {
 
 	ctx := c.Request.Context()
 
-	user, err := h.queries.GetUserByFirebaseUID(ctx, c.GetString("firebase_uid"))
+	user, err := h.queries.GetUserByID(ctx, userID)
 	if err != nil {
 		JSONError(c, http.StatusNotFound, "not_found", "user not found")
 		return

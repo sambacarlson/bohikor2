@@ -5,48 +5,83 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 
 	db "github.com/Iknite-Space/bohikor2/db/sqlc"
 )
 
 type Querier interface {
-	GetAdminByFirebaseUID(ctx context.Context, firebaseUid string) (db.Admin, error)
-	GetUserByFirebaseUID(ctx context.Context, firebaseUid string) (db.User, error)
+	GetAdminByID(ctx context.Context, id uuid.UUID) (db.Admin, error)
+	GetUserByID(ctx context.Context, id uuid.UUID) (db.User, error)
 }
 
 func RequireAdmin(q Querier) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		firebaseUID := c.GetString("firebase_uid")
-		if firebaseUID == "" {
+		subjectIDStr := c.GetString("subject_id")
+		if subjectIDStr == "" {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
 				"error": "unauthenticated",
 			})
 			return
 		}
 
-		_, err := q.GetAdminByFirebaseUID(c.Request.Context(), firebaseUID)
-		if err != nil {
+		subjectType := c.GetString("subject_type")
+		if subjectType != "admin" {
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
 				"error": "admin access required",
 			})
 			return
 		}
 
+		subjectID, err := uuid.Parse(subjectIDStr)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"error": "invalid subject id",
+			})
+			return
+		}
+
+		admin, err := q.GetAdminByID(c.Request.Context(), subjectID)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+				"error": "admin not found",
+			})
+			return
+		}
+
+		c.Set("admin_id", admin.ID.String())
+		c.Set("admin_email", admin.Email)
 		c.Next()
 	}
 }
 
 func RequireActiveUser(q Querier) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		firebaseUID := c.GetString("firebase_uid")
-		if firebaseUID == "" {
+		subjectIDStr := c.GetString("subject_id")
+		if subjectIDStr == "" {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
 				"error": "unauthenticated",
 			})
 			return
 		}
 
-		user, err := q.GetUserByFirebaseUID(c.Request.Context(), firebaseUID)
+		subjectType := c.GetString("subject_type")
+		if subjectType != "user" {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+				"error": "user access required",
+			})
+			return
+		}
+
+		subjectID, err := uuid.Parse(subjectIDStr)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"error": "invalid subject id",
+			})
+			return
+		}
+
+		user, err := q.GetUserByID(c.Request.Context(), subjectID)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusNotFound, gin.H{
 				"error": "user not found",

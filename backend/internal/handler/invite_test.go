@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"firebase.google.com/go/v4/auth"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
 	db "github.com/Iknite-Space/bohikor2/db/sqlc"
+	"github.com/Iknite-Space/bohikor2/internal/authjwt"
 	"github.com/Iknite-Space/bohikor2/internal/middleware"
 	"github.com/Iknite-Space/bohikor2/internal/service"
 )
@@ -33,7 +33,7 @@ type mockAdminQuerier struct {
 	adminErr error
 }
 
-func (m *mockAdminQuerier) GetAdminByFirebaseUID(ctx context.Context, firebaseUid string) (db.Admin, error) {
+func (m *mockAdminQuerier) GetAdminByID(ctx context.Context, id uuid.UUID) (db.Admin, error) {
 	if m.adminErr != nil {
 		return db.Admin{}, m.adminErr
 	}
@@ -43,23 +43,23 @@ func (m *mockAdminQuerier) GetAdminByFirebaseUID(ctx context.Context, firebaseUi
 	return *m.admin, nil
 }
 
-func (m *mockAdminQuerier) GetUserByFirebaseUID(ctx context.Context, firebaseUid string) (db.User, error) {
+func (m *mockAdminQuerier) GetUserByID(ctx context.Context, id uuid.UUID) (db.User, error) {
 	return db.User{}, errors.New("not found")
 }
 
-type mockAuthVerifier struct {
-	token *auth.Token
-	err   error
-}
-
-func (m *mockAuthVerifier) VerifyIDToken(ctx context.Context, idToken string) (*auth.Token, error) {
-	return m.token, m.err
+func makeToken(svc authjwt.TokenService, subjectID, subjectType string) string {
+	token, err := svc.GenerateAccessToken(subjectID, subjectType)
+	if err != nil {
+		panic(err)
+	}
+	return token
 }
 
 func TestHandleInvite_NoAuth(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	svc := authjwt.NewHS256Service("test-secret", 15*time.Minute)
 	r := gin.New()
-	r.Use(middleware.FirebaseAuth(&mockAuthVerifier{}))
+	r.Use(middleware.JWTAuth(svc))
 	r.POST("/api/admin/invite", HandleInvite(&mockInviteQuerier{}))
 
 	w := httptest.NewRecorder()
@@ -74,18 +74,17 @@ func TestHandleInvite_NoAuth(t *testing.T) {
 
 func TestHandleInvite_NonAdmin(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	verifier := &mockAuthVerifier{
-		token: &auth.Token{UID: "test-uid", AuthTime: time.Now().Unix()},
-	}
+	svc := authjwt.NewHS256Service("test-secret", 15*time.Minute)
+	token := makeToken(svc, uuid.New().String(), "user")
 	r := gin.New()
-	r.Use(middleware.FirebaseAuth(verifier))
+	r.Use(middleware.JWTAuth(svc))
 	r.Use(middleware.RequireAdmin(&mockAdminQuerier{}))
 	r.POST("/api/admin/invite", HandleInvite(&mockInviteQuerier{}))
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequestWithContext(context.Background(), "POST", "/api/admin/invite", strings.NewReader(`{"email":"test@example.com"}`))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("Authorization", "Bearer "+token)
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusForbidden {
@@ -96,14 +95,13 @@ func TestHandleInvite_NonAdmin(t *testing.T) {
 func TestHandleInvite_ValidRequest(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	adminID := uuid.New()
-	verifier := &mockAuthVerifier{
-		token: &auth.Token{UID: adminID.String(), AuthTime: time.Now().Unix()},
-	}
+	svc := authjwt.NewHS256Service("test-secret", 15*time.Minute)
+	token := makeToken(svc, adminID.String(), "admin")
 	adminQuerier := &mockAdminQuerier{
 		admin: &db.Admin{
-			ID:          uuid.New(),
-			Email:       "admin@example.com",
-			FirebaseUid: adminID.String(),
+			ID:           adminID,
+			Email:        "admin@example.com",
+			PasswordHash: "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy",
 		},
 	}
 	inviteQuerier := &mockInviteQuerier{
@@ -118,14 +116,14 @@ func TestHandleInvite_ValidRequest(t *testing.T) {
 	}
 
 	r := gin.New()
-	r.Use(middleware.FirebaseAuth(verifier))
+	r.Use(middleware.JWTAuth(svc))
 	r.Use(middleware.RequireAdmin(adminQuerier))
 	r.POST("/api/admin/invite", HandleInvite(inviteQuerier))
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequestWithContext(context.Background(), "POST", "/api/admin/invite", strings.NewReader(`{"email":"newadmin@example.com"}`))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("Authorization", "Bearer "+token)
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusCreated {
@@ -151,14 +149,13 @@ func TestHandleInvite_ValidRequest(t *testing.T) {
 func TestHandleInvite_DuplicateInvitation(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	adminID := uuid.New()
-	verifier := &mockAuthVerifier{
-		token: &auth.Token{UID: adminID.String(), AuthTime: time.Now().Unix()},
-	}
+	svc := authjwt.NewHS256Service("test-secret", 15*time.Minute)
+	token := makeToken(svc, adminID.String(), "admin")
 	adminQuerier := &mockAdminQuerier{
 		admin: &db.Admin{
-			ID:          uuid.New(),
-			Email:       "admin@example.com",
-			FirebaseUid: adminID.String(),
+			ID:           adminID,
+			Email:        "admin@example.com",
+			PasswordHash: "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy",
 		},
 	}
 	inviteQuerier := &mockInviteQuerier{
@@ -166,14 +163,14 @@ func TestHandleInvite_DuplicateInvitation(t *testing.T) {
 	}
 
 	r := gin.New()
-	r.Use(middleware.FirebaseAuth(verifier))
+	r.Use(middleware.JWTAuth(svc))
 	r.Use(middleware.RequireAdmin(adminQuerier))
 	r.POST("/api/admin/invite", HandleInvite(inviteQuerier))
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequestWithContext(context.Background(), "POST", "/api/admin/invite", strings.NewReader(`{"email":"existing@example.com"}`))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("Authorization", "Bearer "+token)
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusConflict {
@@ -184,26 +181,25 @@ func TestHandleInvite_DuplicateInvitation(t *testing.T) {
 func TestHandleInvite_BadRequestBody(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	adminID := uuid.New()
-	verifier := &mockAuthVerifier{
-		token: &auth.Token{UID: adminID.String(), AuthTime: time.Now().Unix()},
-	}
+	svc := authjwt.NewHS256Service("test-secret", 15*time.Minute)
+	token := makeToken(svc, adminID.String(), "admin")
 	adminQuerier := &mockAdminQuerier{
 		admin: &db.Admin{
-			ID:          uuid.New(),
-			Email:       "admin@example.com",
-			FirebaseUid: adminID.String(),
+			ID:           adminID,
+			Email:        "admin@example.com",
+			PasswordHash: "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy",
 		},
 	}
 
 	r := gin.New()
-	r.Use(middleware.FirebaseAuth(verifier))
+	r.Use(middleware.JWTAuth(svc))
 	r.Use(middleware.RequireAdmin(adminQuerier))
 	r.POST("/api/admin/invite", HandleInvite(&mockInviteQuerier{}))
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequestWithContext(context.Background(), "POST", "/api/admin/invite", strings.NewReader(`{"email":"not-an-email"}`))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("Authorization", "Bearer "+token)
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusBadRequest {
@@ -214,26 +210,25 @@ func TestHandleInvite_BadRequestBody(t *testing.T) {
 func TestHandleInvite_MissingEmail(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	adminID := uuid.New()
-	verifier := &mockAuthVerifier{
-		token: &auth.Token{UID: adminID.String(), AuthTime: time.Now().Unix()},
-	}
+	svc := authjwt.NewHS256Service("test-secret", 15*time.Minute)
+	token := makeToken(svc, adminID.String(), "admin")
 	adminQuerier := &mockAdminQuerier{
 		admin: &db.Admin{
-			ID:          uuid.New(),
-			Email:       "admin@example.com",
-			FirebaseUid: adminID.String(),
+			ID:           adminID,
+			Email:        "admin@example.com",
+			PasswordHash: "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy",
 		},
 	}
 
 	r := gin.New()
-	r.Use(middleware.FirebaseAuth(verifier))
+	r.Use(middleware.JWTAuth(svc))
 	r.Use(middleware.RequireAdmin(adminQuerier))
 	r.POST("/api/admin/invite", HandleInvite(&mockInviteQuerier{}))
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequestWithContext(context.Background(), "POST", "/api/admin/invite", strings.NewReader(`{}`))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("Authorization", "Bearer "+token)
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusBadRequest {

@@ -1,22 +1,15 @@
 package middleware
 
 import (
-	"context"
 	"net/http"
 	"strings"
-	"time"
 
-	"firebase.google.com/go/v4/auth"
 	"github.com/gin-gonic/gin"
+
+	"github.com/Iknite-Space/bohikor2/internal/authjwt"
 )
 
-const sessionMaxAge = 30 * 24 * time.Hour
-
-type AuthVerifier interface {
-	VerifyIDToken(ctx context.Context, idToken string) (*auth.Token, error)
-}
-
-func FirebaseAuth(verifier AuthVerifier) gin.HandlerFunc {
+func JWTAuth(verifier authjwt.TokenService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
@@ -34,7 +27,7 @@ func FirebaseAuth(verifier AuthVerifier) gin.HandlerFunc {
 			return
 		}
 
-		idToken, err := verifier.VerifyIDToken(c.Request.Context(), token)
+		claims, err := verifier.VerifyAccessToken(token)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
 				"error": "invalid token",
@@ -42,23 +35,8 @@ func FirebaseAuth(verifier AuthVerifier) gin.HandlerFunc {
 			return
 		}
 
-		authTimeUnix := time.Unix(idToken.AuthTime, 0)
-		if time.Since(authTimeUnix) > sessionMaxAge {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-				"error":           "session_expired",
-				"reauth_required": true,
-			})
-			return
-		}
-
-		c.Set("firebase_uid", idToken.UID)
-		if email, ok := idToken.Claims["email"].(string); ok {
-			c.Set("email", email)
-		}
-		if phone, ok := idToken.Claims["phone_number"].(string); ok {
-			c.Set("phone_number", phone)
-		}
-
+		c.Set("subject_id", claims.SubjectID)
+		c.Set("subject_type", claims.SubjectType)
 		c.Next()
 	}
 }

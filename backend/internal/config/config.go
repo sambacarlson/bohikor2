@@ -13,9 +13,15 @@ type Config struct {
 	Port        int    `env:"PORT" envDefault:"8080"`
 	DatabaseURL string `env:"DATABASE_URL" envDefault:"postgres://localhost:5432/bohikor2?sslmode=disable"`
 
-	// Firebase
-	FirebaseProjectID       string `env:"FIREBASE_PROJECT_ID" envDefault:""`
-	FirebaseCredentialsJSON string `env:"FIREBASE_CREDENTIALS_JSON" envDefault:""`
+	// JWT Auth
+	JWTSecret       string        `env:"JWT_SECRET" envDefault:"change-me-in-production-at-least-32-chars"`
+	JWTAccessExpiry time.Duration `env:"JWT_ACCESS_EXPIRY" envDefault:"15m"`
+
+	// Africa's Talking SMS
+	AfricasTalkingAPIKey   string `env:"AFRICASTALKING_API_KEY" envDefault:""`
+	AfricasTalkingUsername  string `env:"AFRICASTALKING_USERNAME" envDefault:"sandbox"`
+	AfricasTalkingSenderID string `env:"AFRICASTALKING_SENDER_ID" envDefault:""`
+	AfricasTalkingBaseURL   string `env:"AFRICASTALKING_BASE_URL" envDefault:"https://api.sandbox.africastalking.com/v1"`
 
 	// Campay
 	CampayPermanentAccessToken string `env:"CAMPAY_PERMANENT_ACCESS_TOKEN" envDefault:""`

@@ -85,11 +85,23 @@
 - Mobile: verify terms acceptance flow, request creation, history rendering
 - Admin: requests page renders, status badges correct
 
+## Epic 2.5: Firebase Removal — Own Auth (In Progress)
+
+Remove Firebase from all frontends. Backend becomes sole auth authority using JWTs, bcrypt, and Africa's Talking SMS.
+
+- Backend: `authjwt/` (JWT HS256), `authpassword/` (bcrypt), `sms/africastalking/` — all behind interfaces for microservice extraction
+- Backend: new endpoints `POST /api/auth/send-phone-otp`, `POST /api/auth/verify-phone-otp`, `POST /api/auth/admin/login`, `POST /api/auth/refresh`, `POST /api/auth/logout`
+- Backend: migration drops `firebase_uid`, adds `phone_otps`, `refresh_tokens`, `password_hash` on admins
+- Backend: `cmd/create-admin` CLI tool for seeding admins
+- Mobile: remove `@react-native-firebase/*`, use `expo-secure-store` for tokens, backend-driven OTP flow
+- Admin: remove `firebase` web SDK, use localStorage for tokens, backend-driven auth
+
 ## Epic 3: Pilot Launch (Future)
 
 - Kill switch toggle
 - Request window enforcement (15th–end of month)
 - Daily/monthly throttling
+- OTP rate limiting (per-phone, e.g. max 3/hour for send-phone-otp and send-email-otp)
 - Post-payout survey
 - Payout speed metrics
 - Push/SMS/email notifications

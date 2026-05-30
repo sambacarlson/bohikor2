@@ -21,7 +21,7 @@ type InviteStore interface {
 }
 
 type AdminQuerier interface {
-	GetAdminByFirebaseUID(ctx context.Context, firebaseUid string) (db.Admin, error)
+	GetAdminByID(ctx context.Context, id uuid.UUID) (db.Admin, error)
 }
 
 type EmailSender interface {
@@ -46,8 +46,13 @@ type InviteResult struct {
 	Invitation db.Invitation
 }
 
-func (s *InviteService) Invite(ctx context.Context, email string, invitedByFirebaseUID string) (*InviteResult, error) {
-	admin, err := s.querier.GetAdminByFirebaseUID(ctx, invitedByFirebaseUID)
+func (s *InviteService) Invite(ctx context.Context, email string, adminID string) (*InviteResult, error) {
+	id, err := uuid.Parse(adminID)
+	if err != nil {
+		return nil, fmt.Errorf("parse admin id: %w", err)
+	}
+
+	admin, err := s.querier.GetAdminByID(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("lookup admin: %w", err)
 	}
@@ -67,13 +72,13 @@ func (s *InviteService) Invite(ctx context.Context, email string, invitedByFireb
 	}
 
 	if err := s.email.SendInvitation(ctx, email); err != nil {
-		id := pgtype.UUID{Bytes: invitation.ID, Valid: true}
-		_, _ = s.store.UpdateInvitationStatus(ctx, db.InvitationStatusFailed, id)
+		invID := pgtype.UUID{Bytes: invitation.ID, Valid: true}
+		_, _ = s.store.UpdateInvitationStatus(ctx, db.InvitationStatusFailed, invID)
 		return nil, fmt.Errorf("send invitation email: %w", err)
 	}
 
-	id := pgtype.UUID{Bytes: invitation.ID, Valid: true}
-	updated, err := s.store.UpdateInvitationStatus(ctx, db.InvitationStatusSent, id)
+	invID := pgtype.UUID{Bytes: invitation.ID, Valid: true}
+	updated, err := s.store.UpdateInvitationStatus(ctx, db.InvitationStatusSent, invID)
 	if err != nil {
 		return nil, fmt.Errorf("update invitation status to sent: %w", err)
 	}

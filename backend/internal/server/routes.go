@@ -5,23 +5,32 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 
 	db "github.com/Iknite-Space/bohikor2/db/sqlc"
 )
 
-type authQuerier interface {
-	GetUserByFirebaseUID(ctx context.Context, firebaseUid string) (db.User, error)
+type userQuerier interface {
+	GetUserByID(ctx context.Context, id uuid.UUID) (db.User, error)
 }
 
 type adminQuerier interface {
-	GetAdminByFirebaseUID(ctx context.Context, firebaseUid string) (db.Admin, error)
+	GetAdminByID(ctx context.Context, id uuid.UUID) (db.Admin, error)
 }
 
-func handleVerify(q authQuerier) gin.HandlerFunc {
+func handleUserMe(q userQuerier) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		firebaseUID := c.GetString("firebase_uid")
+		subjectIDStr := c.GetString("subject_id")
 
-		user, err := q.GetUserByFirebaseUID(c.Request.Context(), firebaseUID)
+		subjectID, err := uuid.Parse(subjectIDStr)
+		if err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"error": "invalid subject id",
+			})
+			return
+		}
+
+		user, err := q.GetUserByID(c.Request.Context(), subjectID)
 		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{
 				"error": "user not found",
@@ -37,9 +46,17 @@ func handleVerify(q authQuerier) gin.HandlerFunc {
 
 func handleAdminMe(q adminQuerier) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		firebaseUID := c.GetString("firebase_uid")
+		subjectIDStr := c.GetString("subject_id")
 
-		admin, err := q.GetAdminByFirebaseUID(c.Request.Context(), firebaseUID)
+		subjectID, err := uuid.Parse(subjectIDStr)
+		if err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"error": "invalid subject id",
+			})
+			return
+		}
+
+		admin, err := q.GetAdminByID(c.Request.Context(), subjectID)
 		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{
 				"error": "admin not found",
@@ -49,24 +66,6 @@ func handleAdminMe(q adminQuerier) gin.HandlerFunc {
 
 		c.JSON(http.StatusOK, gin.H{
 			"data": admin,
-		})
-	}
-}
-
-func handleUserMe(q authQuerier) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		firebaseUID := c.GetString("firebase_uid")
-
-		user, err := q.GetUserByFirebaseUID(c.Request.Context(), firebaseUID)
-		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{
-				"error": "user not found",
-			})
-			return
-		}
-
-		c.JSON(http.StatusOK, gin.H{
-			"data": user,
 		})
 	}
 }

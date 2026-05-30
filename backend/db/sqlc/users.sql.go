@@ -16,17 +16,16 @@ import (
 
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (
-    email, email_verified, firebase_uid, full_name,
+    email, email_verified, full_name,
     phone_number, phone_verified, status
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7
-) RETURNING id, email, email_verified, firebase_uid, full_name, phone_number, phone_verified, status, is_terms_accepted, terms_accepted_at, terms_version, user_ip_at_consent, created_at, updated_at
+    $1, $2, $3, $4, $5, $6
+) RETURNING id, email, email_verified, full_name, phone_number, phone_verified, status, is_terms_accepted, terms_accepted_at, terms_version, user_ip_at_consent, created_at, updated_at
 `
 
 type CreateUserParams struct {
 	Email         string      `json:"email"`
 	EmailVerified bool        `json:"email_verified"`
-	FirebaseUid   string      `json:"firebase_uid"`
 	FullName      pgtype.Text `json:"full_name"`
 	PhoneNumber   string      `json:"phone_number"`
 	PhoneVerified bool        `json:"phone_verified"`
@@ -37,7 +36,6 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 	row := q.db.QueryRow(ctx, createUser,
 		arg.Email,
 		arg.EmailVerified,
-		arg.FirebaseUid,
 		arg.FullName,
 		arg.PhoneNumber,
 		arg.PhoneVerified,
@@ -48,7 +46,6 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.ID,
 		&i.Email,
 		&i.EmailVerified,
-		&i.FirebaseUid,
 		&i.FullName,
 		&i.PhoneNumber,
 		&i.PhoneVerified,
@@ -64,7 +61,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, email_verified, firebase_uid, full_name, phone_number, phone_verified, status, is_terms_accepted, terms_accepted_at, terms_version, user_ip_at_consent, created_at, updated_at FROM users WHERE email = $1 LIMIT 1
+SELECT id, email, email_verified, full_name, phone_number, phone_verified, status, is_terms_accepted, terms_accepted_at, terms_version, user_ip_at_consent, created_at, updated_at FROM users WHERE email = $1 LIMIT 1
 `
 
 func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
@@ -74,7 +71,6 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.ID,
 		&i.Email,
 		&i.EmailVerified,
-		&i.FirebaseUid,
 		&i.FullName,
 		&i.PhoneNumber,
 		&i.PhoneVerified,
@@ -89,18 +85,42 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 	return i, err
 }
 
-const getUserByFirebaseUID = `-- name: GetUserByFirebaseUID :one
-SELECT id, email, email_verified, firebase_uid, full_name, phone_number, phone_verified, status, is_terms_accepted, terms_accepted_at, terms_version, user_ip_at_consent, created_at, updated_at FROM users WHERE firebase_uid = $1 LIMIT 1
+const getUserByID = `-- name: GetUserByID :one
+SELECT id, email, email_verified, full_name, phone_number, phone_verified, status, is_terms_accepted, terms_accepted_at, terms_version, user_ip_at_consent, created_at, updated_at FROM users WHERE id = $1 LIMIT 1
 `
 
-func (q *Queries) GetUserByFirebaseUID(ctx context.Context, firebaseUid string) (User, error) {
-	row := q.db.QueryRow(ctx, getUserByFirebaseUID, firebaseUid)
+func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
+	row := q.db.QueryRow(ctx, getUserByID, id)
 	var i User
 	err := row.Scan(
 		&i.ID,
 		&i.Email,
 		&i.EmailVerified,
-		&i.FirebaseUid,
+		&i.FullName,
+		&i.PhoneNumber,
+		&i.PhoneVerified,
+		&i.Status,
+		&i.IsTermsAccepted,
+		&i.TermsAcceptedAt,
+		&i.TermsVersion,
+		&i.UserIpAtConsent,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getUserByPhoneNumber = `-- name: GetUserByPhoneNumber :one
+SELECT id, email, email_verified, full_name, phone_number, phone_verified, status, is_terms_accepted, terms_accepted_at, terms_version, user_ip_at_consent, created_at, updated_at FROM users WHERE phone_number = $1 LIMIT 1
+`
+
+func (q *Queries) GetUserByPhoneNumber(ctx context.Context, phoneNumber string) (User, error) {
+	row := q.db.QueryRow(ctx, getUserByPhoneNumber, phoneNumber)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.EmailVerified,
 		&i.FullName,
 		&i.PhoneNumber,
 		&i.PhoneVerified,
@@ -116,7 +136,7 @@ func (q *Queries) GetUserByFirebaseUID(ctx context.Context, firebaseUid string) 
 }
 
 const listUsers = `-- name: ListUsers :many
-SELECT id, email, email_verified, firebase_uid, full_name, phone_number, phone_verified, status, is_terms_accepted, terms_accepted_at, terms_version, user_ip_at_consent, created_at, updated_at FROM users
+SELECT id, email, email_verified, full_name, phone_number, phone_verified, status, is_terms_accepted, terms_accepted_at, terms_version, user_ip_at_consent, created_at, updated_at FROM users
 ORDER BY created_at DESC
 LIMIT $1 OFFSET $2
 `
@@ -139,7 +159,6 @@ func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]User, e
 			&i.ID,
 			&i.Email,
 			&i.EmailVerified,
-			&i.FirebaseUid,
 			&i.FullName,
 			&i.PhoneNumber,
 			&i.PhoneVerified,
@@ -168,7 +187,7 @@ UPDATE users SET
     terms_version = $4,
     user_ip_at_consent = $5,
     updated_at = NOW()
-WHERE id = $1 RETURNING id, email, email_verified, firebase_uid, full_name, phone_number, phone_verified, status, is_terms_accepted, terms_accepted_at, terms_version, user_ip_at_consent, created_at, updated_at
+WHERE id = $1 RETURNING id, email, email_verified, full_name, phone_number, phone_verified, status, is_terms_accepted, terms_accepted_at, terms_version, user_ip_at_consent, created_at, updated_at
 `
 
 type UpdateTermsAcceptanceParams struct {
@@ -192,7 +211,6 @@ func (q *Queries) UpdateTermsAcceptance(ctx context.Context, arg UpdateTermsAcce
 		&i.ID,
 		&i.Email,
 		&i.EmailVerified,
-		&i.FirebaseUid,
 		&i.FullName,
 		&i.PhoneNumber,
 		&i.PhoneVerified,
@@ -209,7 +227,7 @@ func (q *Queries) UpdateTermsAcceptance(ctx context.Context, arg UpdateTermsAcce
 
 const updateUserStatus = `-- name: UpdateUserStatus :one
 UPDATE users SET status = $2, updated_at = NOW()
-WHERE id = $1 RETURNING id, email, email_verified, firebase_uid, full_name, phone_number, phone_verified, status, is_terms_accepted, terms_accepted_at, terms_version, user_ip_at_consent, created_at, updated_at
+WHERE id = $1 RETURNING id, email, email_verified, full_name, phone_number, phone_verified, status, is_terms_accepted, terms_accepted_at, terms_version, user_ip_at_consent, created_at, updated_at
 `
 
 type UpdateUserStatusParams struct {
@@ -224,7 +242,6 @@ func (q *Queries) UpdateUserStatus(ctx context.Context, arg UpdateUserStatusPara
 		&i.ID,
 		&i.Email,
 		&i.EmailVerified,
-		&i.FirebaseUid,
 		&i.FullName,
 		&i.PhoneNumber,
 		&i.PhoneVerified,

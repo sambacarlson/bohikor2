@@ -1,74 +1,68 @@
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useState,
   type ReactNode,
 } from "react";
-import { type FirebaseAuthTypes } from "@react-native-firebase/auth";
-import { auth } from "@/src/lib/firebase";
 import { api } from "@/src/lib/api";
+import { getAccessToken, setTokens, clearTokens } from "@/src/lib/auth";
 import type { User } from "@/src/types";
 
 interface AuthContextType {
-  firebaseUser: FirebaseAuthTypes.User | null;
-  backendUser: User | null;
+  user: User | null;
   loading: boolean;
   signOut: () => Promise<void>;
-  refreshBackendUser: () => Promise<void>;
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType>({
-  firebaseUser: null,
-  backendUser: null,
+  user: null,
   loading: true,
   signOut: async () => {},
-  refreshBackendUser: async () => {},
+  refreshUser: async () => {},
 });
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [firebaseUser, setFirebaseUser] = useState<FirebaseAuthTypes.User | null>(null);
-  const [backendUser, setBackendUser] = useState<User | null>(null);
+  const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const unsubscribe = auth.onAuthStateChanged(async (user: FirebaseAuthTypes.User | null) => {
-      setFirebaseUser(user);
-
-      if (user) {
-        try {
-          const { data } = await api.get<{ data: User }>("/api/users/me");
-          setBackendUser(data.data);
-        } catch {
-          setBackendUser(null);
-        }
-      } else {
-        setBackendUser(null);
-      }
-
-      setLoading(false);
-    });
-    return unsubscribe;
-  }, []);
-
-  const signOut = async () => {
-    await auth.signOut();
-    setBackendUser(null);
-  };
-
-  const refreshBackendUser = async () => {
+  const fetchUser = useCallback(async () => {
     try {
       const { data } = await api.get<{ data: User }>("/api/users/me");
-      setBackendUser(data.data);
+      setUser(data.data);
     } catch {
-      // Silently fail — user can always refresh again
+      setUser(null);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      const token = await getAccessToken();
+      if (token) {
+        await fetchUser();
+      }
+      setLoading(false);
+    })();
+  }, [fetchUser]);
+
+  const signOut = useCallback(async () => {
+    try {
+      await api.post("/api/auth/logout");
+    } catch {
+      // Ignore logout API errors
+    }
+    await clearTokens();
+    setUser(null);
+  }, []);
+
+  const refreshUser = useCallback(async () => {
+    await fetchUser();
+  }, [fetchUser]);
 
   return (
-    <AuthContext.Provider
-      value={{ firebaseUser, backendUser, loading, signOut, refreshBackendUser }}
-    >
+    <AuthContext.Provider value={{ user, loading, signOut, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

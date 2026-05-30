@@ -26,7 +26,7 @@ CREATE TYPE request_status AS ENUM ('initiated', 'pending', 'success', 'failed')
 CREATE TABLE admins (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     email TEXT UNIQUE NOT NULL,
-    firebase_uid TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 ```
@@ -38,7 +38,6 @@ CREATE TABLE users (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     email TEXT UNIQUE NOT NULL,
     email_verified BOOLEAN NOT NULL DEFAULT FALSE,
-    firebase_uid TEXT UNIQUE NOT NULL,
     full_name TEXT,
     phone_number TEXT NOT NULL,
     phone_verified BOOLEAN NOT NULL DEFAULT FALSE,
@@ -84,6 +83,36 @@ CREATE TABLE email_otps (
 
 CREATE INDEX idx_email_otps_email ON email_otps (email);
 CREATE INDEX idx_email_otps_expires_at ON email_otps (expires_at);
+```
+
+### Phone OTPs (temporary)
+
+```sql
+CREATE TABLE phone_otps (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    phone_number TEXT NOT NULL,
+    code_hash TEXT NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_phone_otps_phone ON phone_otps (phone_number);
+```
+
+### Refresh Tokens
+
+```sql
+CREATE TABLE refresh_tokens (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    token_hash TEXT UNIQUE NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    revoked_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_refresh_tokens_user_id ON refresh_tokens (user_id);
+CREATE INDEX idx_refresh_tokens_token_hash ON refresh_tokens (token_hash);
 ```
 
 ### Events
@@ -139,6 +168,6 @@ CREATE INDEX idx_advance_requests_user_id ON advance_requests (user_id);
 | Question | Resolution |
 | :--- | :--- |
 | **Invitation expiry** | No automatic expiry. Valid until accepted or revoked. |
-| **Phone verification** | Firebase Phone OTP. Phone is primary identity. |
+| **Phone verification** | Africa's Talking SMS OTP. Phone is primary identity. |
 | **Data retention** | Indefinite. |
 | **Terms acceptance** | Stored on `users` table. Must be accepted before requesting advance. Separate from auth flow. |

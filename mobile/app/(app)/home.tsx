@@ -6,18 +6,18 @@ import { useAuth } from "@/src/providers/auth-provider";
 import { useCreateAdvanceRequest } from "@/src/hooks/use-advance";
 
 export default function HomeScreen() {
-  const { backendUser, signOut } = useAuth();
+  const { user, signOut } = useAuth();
   const router = useRouter();
   const [modalVisible, setModalVisible] = useState(false);
   const [menuVisible, setMenuVisible] = useState(false);
   const createRequest = useCreateAdvanceRequest();
 
-  const displayName = backendUser?.full_name || backendUser?.email || "User";
-  const email = backendUser?.email || "";
-  const phone = backendUser?.phone_number || "";
-  const emailVerified = backendUser?.email_verified ?? false;
-  const phoneVerified = backendUser?.phone_verified ?? false;
-  const termsAccepted = backendUser?.is_terms_accepted ?? false;
+  const displayName = user?.full_name || user?.email || "User";
+  const email = user?.email || "";
+  const phone = user?.phone_number || "";
+  const emailVerified = user?.email_verified ?? false;
+  const phoneVerified = user?.phone_verified ?? false;
+  const termsAccepted = user?.is_terms_accepted ?? false;
 
   const handleRequestAdvance = () => {
     if (!termsAccepted) {
@@ -118,18 +118,18 @@ export default function HomeScreen() {
                   </Text>
                 </View>
               </View>
-              {backendUser?.full_name && (
+              {user?.full_name && (
                 <View className="flex-row justify-between items-center">
                   <Text className="text-base text-gray-500">Name</Text>
                   <Text className="text-base text-gray-900">
-                    {backendUser.full_name}
+                    {user.full_name}
                   </Text>
                 </View>
               )}
               <View className="flex-row justify-between items-center">
                 <Text className="text-base text-gray-500">Status</Text>
                 <Text className="text-base text-gray-900">
-                  {backendUser?.status || "—"}
+                  {user?.status || "—"}
                 </Text>
               </View>
               <View className="flex-row justify-between items-center">

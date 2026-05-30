@@ -7,42 +7,60 @@ package db
 
 import (
 	"context"
+
+	"github.com/google/uuid"
 )
 
 const createAdmin = `-- name: CreateAdmin :one
-INSERT INTO admins (email, firebase_uid)
-VALUES ($1, $2) RETURNING id, email, firebase_uid, created_at
+INSERT INTO admins (email, password_hash)
+VALUES ($1, $2) RETURNING id, email, created_at, password_hash
 `
 
 type CreateAdminParams struct {
-	Email       string `json:"email"`
-	FirebaseUid string `json:"firebase_uid"`
+	Email        string `json:"email"`
+	PasswordHash string `json:"password_hash"`
 }
 
 func (q *Queries) CreateAdmin(ctx context.Context, arg CreateAdminParams) (Admin, error) {
-	row := q.db.QueryRow(ctx, createAdmin, arg.Email, arg.FirebaseUid)
+	row := q.db.QueryRow(ctx, createAdmin, arg.Email, arg.PasswordHash)
 	var i Admin
 	err := row.Scan(
 		&i.ID,
 		&i.Email,
-		&i.FirebaseUid,
 		&i.CreatedAt,
+		&i.PasswordHash,
 	)
 	return i, err
 }
 
-const getAdminByFirebaseUID = `-- name: GetAdminByFirebaseUID :one
-SELECT id, email, firebase_uid, created_at FROM admins WHERE firebase_uid = $1 LIMIT 1
+const getAdminByEmail = `-- name: GetAdminByEmail :one
+SELECT id, email, created_at, password_hash FROM admins WHERE email = $1 LIMIT 1
 `
 
-func (q *Queries) GetAdminByFirebaseUID(ctx context.Context, firebaseUid string) (Admin, error) {
-	row := q.db.QueryRow(ctx, getAdminByFirebaseUID, firebaseUid)
+func (q *Queries) GetAdminByEmail(ctx context.Context, email string) (Admin, error) {
+	row := q.db.QueryRow(ctx, getAdminByEmail, email)
 	var i Admin
 	err := row.Scan(
 		&i.ID,
 		&i.Email,
-		&i.FirebaseUid,
 		&i.CreatedAt,
+		&i.PasswordHash,
+	)
+	return i, err
+}
+
+const getAdminByID = `-- name: GetAdminByID :one
+SELECT id, email, created_at, password_hash FROM admins WHERE id = $1 LIMIT 1
+`
+
+func (q *Queries) GetAdminByID(ctx context.Context, id uuid.UUID) (Admin, error) {
+	row := q.db.QueryRow(ctx, getAdminByID, id)
+	var i Admin
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.CreatedAt,
+		&i.PasswordHash,
 	)
 	return i, err
 }

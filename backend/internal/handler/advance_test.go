@@ -34,7 +34,7 @@ type mockAdvanceQuerier struct {
 	listErr        error
 }
 
-func (m *mockAdvanceQuerier) GetUserByFirebaseUID(ctx context.Context, firebaseUid string) (db.User, error) {
+func (m *mockAdvanceQuerier) GetUserByID(ctx context.Context, id uuid.UUID) (db.User, error) {
 	if m.getUserErr != nil {
 		return db.User{}, m.getUserErr
 	}
@@ -110,9 +110,10 @@ func makeTestGin() *gin.Engine {
 	return gin.New()
 }
 
-func setUserContext(c *gin.Context, userID uuid.UUID, firebaseUID string) {
+func setUserContext(c *gin.Context, userID uuid.UUID) {
 	c.Set("user_id", userID)
-	c.Set("firebase_uid", firebaseUID)
+	c.Set("subject_id", userID.String())
+	c.Set("subject_type", "user")
 }
 
 func mustUnmarshalData(t *testing.T, body []byte) map[string]interface{} {
@@ -146,7 +147,6 @@ func TestCreateRequest_NotTermsAccepted(t *testing.T) {
 	q := &mockAdvanceQuerier{
 		user: &db.User{
 			ID:              userID,
-			FirebaseUid:     "fb-uid",
 			IsTermsAccepted: false,
 			Status:          db.UserStatusActive,
 		},
@@ -155,7 +155,7 @@ func TestCreateRequest_NotTermsAccepted(t *testing.T) {
 
 	r := makeTestGin()
 	r.POST("/api/advance-requests", func(c *gin.Context) {
-		setUserContext(c, userID, "fb-uid")
+		setUserContext(c, userID)
 		h.CreateRequest(c)
 	})
 
@@ -175,7 +175,6 @@ func TestCreateRequest_ActiveRequestExists(t *testing.T) {
 	q := &mockAdvanceQuerier{
 		user: &db.User{
 			ID:              userID,
-			FirebaseUid:     "fb-uid",
 			IsTermsAccepted: true,
 			Status:          db.UserStatusActive,
 		},
@@ -189,7 +188,7 @@ func TestCreateRequest_ActiveRequestExists(t *testing.T) {
 
 	r := makeTestGin()
 	r.POST("/api/advance-requests", func(c *gin.Context) {
-		setUserContext(c, userID, "fb-uid")
+		setUserContext(c, userID)
 		h.CreateRequest(c)
 	})
 
@@ -209,7 +208,6 @@ func TestCreateRequest_MissingPhoneNumber(t *testing.T) {
 	q := &mockAdvanceQuerier{
 		user: &db.User{
 			ID:              userID,
-			FirebaseUid:     "fb-uid",
 			IsTermsAccepted: true,
 			Status:          db.UserStatusActive,
 		},
@@ -218,7 +216,7 @@ func TestCreateRequest_MissingPhoneNumber(t *testing.T) {
 
 	r := makeTestGin()
 	r.POST("/api/advance-requests", func(c *gin.Context) {
-		setUserContext(c, userID, "fb-uid")
+		setUserContext(c, userID)
 		h.CreateRequest(c)
 	})
 
@@ -238,7 +236,6 @@ func TestCreateRequest_TransferSuccess(t *testing.T) {
 	q := &mockAdvanceQuerier{
 		user: &db.User{
 			ID:              userID,
-			FirebaseUid:     "fb-uid",
 			IsTermsAccepted: true,
 			Status:          db.UserStatusActive,
 		},
@@ -253,7 +250,7 @@ func TestCreateRequest_TransferSuccess(t *testing.T) {
 
 	r := makeTestGin()
 	r.POST("/api/advance-requests", func(c *gin.Context) {
-		setUserContext(c, userID, "fb-uid")
+		setUserContext(c, userID)
 		h.CreateRequest(c)
 	})
 
@@ -278,7 +275,6 @@ func TestCreateRequest_TransferPending(t *testing.T) {
 	q := &mockAdvanceQuerier{
 		user: &db.User{
 			ID:              userID,
-			FirebaseUid:     "fb-uid",
 			IsTermsAccepted: true,
 			Status:          db.UserStatusActive,
 		},
@@ -293,7 +289,7 @@ func TestCreateRequest_TransferPending(t *testing.T) {
 
 	r := makeTestGin()
 	r.POST("/api/advance-requests", func(c *gin.Context) {
-		setUserContext(c, userID, "fb-uid")
+		setUserContext(c, userID)
 		h.CreateRequest(c)
 	})
 
@@ -318,7 +314,6 @@ func TestCreateRequest_TransferFailed(t *testing.T) {
 	q := &mockAdvanceQuerier{
 		user: &db.User{
 			ID:              userID,
-			FirebaseUid:     "fb-uid",
 			IsTermsAccepted: true,
 			Status:          db.UserStatusActive,
 		},
@@ -330,7 +325,7 @@ func TestCreateRequest_TransferFailed(t *testing.T) {
 
 	r := makeTestGin()
 	r.POST("/api/advance-requests", func(c *gin.Context) {
-		setUserContext(c, userID, "fb-uid")
+		setUserContext(c, userID)
 		h.CreateRequest(c)
 	})
 
@@ -350,7 +345,6 @@ func TestCreateRequest_InvalidJSON(t *testing.T) {
 	q := &mockAdvanceQuerier{
 		user: &db.User{
 			ID:              userID,
-			FirebaseUid:     "fb-uid",
 			IsTermsAccepted: true,
 			Status:          db.UserStatusActive,
 		},
@@ -359,7 +353,7 @@ func TestCreateRequest_InvalidJSON(t *testing.T) {
 
 	r := makeTestGin()
 	r.POST("/api/advance-requests", func(c *gin.Context) {
-		setUserContext(c, userID, "fb-uid")
+		setUserContext(c, userID)
 		h.CreateRequest(c)
 	})
 
@@ -379,7 +373,6 @@ func TestCreateRequest_RequireActiveUser_ShouldBeEnforcedByMiddleware(t *testing
 	q := &mockAdvanceQuerier{
 		user: &db.User{
 			ID:              userID,
-			FirebaseUid:     "fb-uid",
 			IsTermsAccepted: true,
 			Status:          db.UserStatusSuspended,
 		},
@@ -394,7 +387,7 @@ func TestCreateRequest_RequireActiveUser_ShouldBeEnforcedByMiddleware(t *testing
 
 	r := makeTestGin()
 	r.POST("/api/advance-requests", func(c *gin.Context) {
-		setUserContext(c, userID, "fb-uid")
+		setUserContext(c, userID)
 		h.CreateRequest(c)
 	})
 
@@ -416,7 +409,7 @@ func TestListUserRequests_Empty(t *testing.T) {
 
 	r := makeTestGin()
 	r.GET("/api/advance-requests", func(c *gin.Context) {
-		setUserContext(c, userID, "fb-uid")
+		setUserContext(c, userID)
 		h.ListUserRequests(c)
 	})
 
@@ -446,7 +439,7 @@ func TestListUserRequests_WithData(t *testing.T) {
 
 	r := makeTestGin()
 	r.GET("/api/advance-requests", func(c *gin.Context) {
-		setUserContext(c, userID, "fb-uid")
+		setUserContext(c, userID)
 		h.ListUserRequests(c)
 	})
 
@@ -781,7 +774,6 @@ func TestRequireActiveUser_Unauthenticated(t *testing.T) {
 	q := &mockAdvanceQuerier{
 		user: &db.User{
 			ID:              uuid.New(),
-			FirebaseUid:     "fb-uid",
 			IsTermsAccepted: false,
 			Status:          db.UserStatusActive,
 		},

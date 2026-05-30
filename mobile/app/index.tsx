@@ -3,7 +3,7 @@ import { useAuth } from "@/src/providers/auth-provider";
 import { ActivityIndicator, View } from "react-native";
 
 export default function Index() {
-  const { firebaseUser, loading } = useAuth();
+  const { user, loading } = useAuth();
 
   if (loading) {
     return (
@@ -13,7 +13,7 @@ export default function Index() {
     );
   }
 
-  if (firebaseUser) {
+  if (user) {
     return <Redirect href="/(app)/home" />;
   }
 

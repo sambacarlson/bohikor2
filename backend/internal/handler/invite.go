@@ -26,7 +26,7 @@ func HandleInvite(q InviteQuerier) gin.HandlerFunc {
 			return
 		}
 
-		adminID := c.GetString("firebase_uid")
+		adminID := c.GetString("admin_id")
 		if adminID == "" {
 			JSONError(c, http.StatusUnauthorized, "unauthorized", "missing admin identity")
 			return
