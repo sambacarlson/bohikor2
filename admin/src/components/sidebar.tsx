@@ -4,7 +4,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { auth } from "@/lib/firebase";
+import { useAuth } from "@/components/providers";
 import { LayoutDashboard, Mail, Users, ArrowLeftRight, LogOut } from "lucide-react";
 
 const navItems = [
@@ -16,6 +16,7 @@ const navItems = [
 
 export function Sidebar() {
   const pathname = usePathname();
+  const { signOut } = useAuth();
 
   return (
     <aside className="flex h-screen w-64 flex-col border-r bg-sidebar">
@@ -57,7 +58,7 @@ export function Sidebar() {
 
       <div className="border-t p-4">
         <button
-          onClick={() => auth.signOut()}
+          onClick={() => signOut()}
           className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
         >
           <LogOut className="h-5 w-5" />

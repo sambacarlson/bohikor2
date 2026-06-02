@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { auth } from "@/lib/firebase";
+import { useAuth } from "@/components/providers";
 import { Button } from "@/components/ui/button";
 import { ShieldAlert } from "lucide-react";
 
@@ -15,6 +15,7 @@ export function ForbiddenPage({
   backLabel = "Go to Login",
 }: ForbiddenPageProps) {
   const router = useRouter();
+  const { signOut } = useAuth();
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-muted/50 p-4">
@@ -35,10 +36,9 @@ export function ForbiddenPage({
         </div>
         <div className="flex flex-col gap-2">
           <Button
-            onClick={() => {
-              auth.signOut().then(() => {
-                router.push(backHref);
-              });
+            onClick={async () => {
+              await signOut();
+              router.push(backHref);
             }}
           >
             {backLabel}

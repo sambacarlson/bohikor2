@@ -4,6 +4,7 @@ import AdminLoginPage from "../page";
 
 const mockPush = jest.fn();
 const mockReplace = jest.fn();
+const mockRefreshSubject = jest.fn();
 
 jest.mock("next/navigation", () => ({
   useRouter: () => ({ push: mockPush, replace: mockReplace }),
@@ -13,28 +14,30 @@ jest.mock("@/components/providers", () => ({
   useAuth: jest.fn(),
 }));
 
-const signInMock = jest.fn();
-
-jest.mock("firebase/auth", () => ({
-  signInWithEmailAndPassword: jest.fn().mockImplementation(() => signInMock()),
+jest.mock("@/lib/api", () => ({
+  api: {
+    post: jest.fn(),
+  },
 }));
 
-jest.mock("@/lib/firebase", () => ({
-  auth: {},
+jest.mock("@/lib/auth", () => ({
+  setTokens: jest.fn(),
 }));
 
-const { signInWithEmailAndPassword } = jest.requireMock("firebase/auth");
 const { useAuth } = jest.requireMock("@/components/providers");
+const { api } = jest.requireMock("@/lib/api");
+const { setTokens } = jest.requireMock("@/lib/auth");
 
 describe("AdminLoginPage", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     useAuth.mockReturnValue({
-      user: null,
+      admin: null,
+      subjectType: null,
       loading: false,
+      signOut: jest.fn(),
+      refreshSubject: mockRefreshSubject,
     });
-    signInMock.mockResolvedValue({});
-    signInWithEmailAndPassword.mockImplementation(() => signInMock());
   });
 
   it("renders admin login form", () => {
@@ -53,68 +56,53 @@ describe("AdminLoginPage", () => {
     expect(screen.getByText("Back to login")).toBeInTheDocument();
   });
 
-  it("shows loading spinner while auth is loading", () => {
-    useAuth.mockReturnValue({ user: null, loading: true });
-    const { container } = render(<AdminLoginPage />);
-    expect(container.querySelector(".animate-spin")).toBeInTheDocument();
-  });
+  it("calls api post on form submit", async () => {
+    api.post.mockResolvedValue({
+      data: { data: { access_token: "at", refresh_token: "rt" } },
+    });
+    mockRefreshSubject.mockResolvedValue(undefined);
 
-  it("redirects to admin if already logged in", () => {
-    useAuth.mockReturnValue({ user: { uid: "test" }, loading: false });
-    render(<AdminLoginPage />);
-    expect(mockReplace).toHaveBeenCalledWith("/admin");
-  });
-
-  it("calls signIn on form submit", async () => {
     const user = userEvent.setup();
     render(<AdminLoginPage />);
 
-    const emailInput = screen.getByLabelText(/email/i);
-    const passwordInput = screen.getByLabelText(/password/i);
+    await user.type(screen.getByLabelText(/email/i), "admin@example.com");
+    await user.type(screen.getByLabelText(/password/i), "password123");
+    await user.click(screen.getByText("Sign In"));
 
-    await user.type(emailInput, "admin@example.com");
-    await user.type(passwordInput, "password123");
-
-    const signInBtn = screen.getByText("Sign In");
-    await user.click(signInBtn);
-
-    expect(signInWithEmailAndPassword).toHaveBeenCalled();
+    expect(api.post).toHaveBeenCalledWith("/api/auth/admin/login", {
+      email: "admin@example.com",
+      password: "password123",
+    });
   });
 
   it("redirects to admin dashboard on success", async () => {
-    const user = userEvent.setup();
-    signInMock.mockResolvedValue({});
+    api.post.mockResolvedValue({
+      data: { data: { access_token: "at", refresh_token: "rt" } },
+    });
+    mockRefreshSubject.mockResolvedValue(undefined);
 
+    const user = userEvent.setup();
     render(<AdminLoginPage />);
 
-    const emailInput = screen.getByLabelText(/email/i);
-    const passwordInput = screen.getByLabelText(/password/i);
+    await user.type(screen.getByLabelText(/email/i), "admin@example.com");
+    await user.type(screen.getByLabelText(/password/i), "password123");
+    await user.click(screen.getByText("Sign In"));
 
-    await user.type(emailInput, "admin@example.com");
-    await user.type(passwordInput, "password123");
-
-    const signInBtn = screen.getByText("Sign In");
-    await user.click(signInBtn);
-
+    expect(setTokens).toHaveBeenCalledWith("at", "rt");
     expect(mockPush).toHaveBeenCalledWith("/admin");
   });
 
   it("shows error on invalid credentials", async () => {
-    const user = userEvent.setup();
-    const error = new Error("Firebase auth error");
-    (error as Record<string, string>).code = "auth/invalid-credential";
-    signInMock.mockRejectedValue(error);
+    api.post.mockRejectedValue({
+      response: { data: { error: "Invalid email or password" } },
+    });
 
+    const user = userEvent.setup();
     render(<AdminLoginPage />);
 
-    const emailInput = screen.getByLabelText(/email/i);
-    const passwordInput = screen.getByLabelText(/password/i);
-
-    await user.type(emailInput, "wrong@example.com");
-    await user.type(passwordInput, "wrong");
-
-    const signInBtn = screen.getByText("Sign In");
-    await user.click(signInBtn);
+    await user.type(screen.getByLabelText(/email/i), "wrong@example.com");
+    await user.type(screen.getByLabelText(/password/i), "wrong");
+    await user.click(screen.getByText("Sign In"));
 
     expect(
       screen.getByText("Invalid email or password")

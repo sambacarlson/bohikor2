@@ -6,7 +6,6 @@ export interface User {
   id: string;
   email: string;
   email_verified: boolean;
-  firebase_uid: string;
   full_name: string | null;
   phone_number: string;
   phone_verified: boolean;
@@ -31,7 +30,7 @@ export interface Invitation {
 export interface Admin {
   id: string;
   email: string;
-  firebase_uid: string;
+  password_hash: string;
   created_at: string;
 }
 

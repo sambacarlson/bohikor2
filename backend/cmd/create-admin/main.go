@@ -9,9 +9,9 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	db "github.com/Iknite-Space/bohikor2/db/sqlc"
 	"github.com/Iknite-Space/bohikor2/internal/authpassword"
 	"github.com/Iknite-Space/bohikor2/internal/config"
-	db "github.com/Iknite-Space/bohikor2/db/sqlc"
 )
 
 func main() {

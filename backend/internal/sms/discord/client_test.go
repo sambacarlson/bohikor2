@@ -64,7 +64,7 @@ func TestSendOTP_Success(t *testing.T) {
 func TestSendOTP_ServerError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(`{"message": "Internal Server Error"}`))
+		_, _ = w.Write([]byte(`{"message": "Internal Server Error"}`))
 	}))
 	defer server.Close()
 

@@ -85,16 +85,36 @@
 - Mobile: verify terms acceptance flow, request creation, history rendering
 - Admin: requests page renders, status badges correct
 
-## Epic 2.5: Firebase Removal — Own Auth (In Progress)
+## Epic 2.5: Firebase Removal — Own Auth (Complete)
 
-Remove Firebase from all frontends. Backend becomes sole auth authority using JWTs, bcrypt, and Africa's Talking SMS.
+Removed Firebase from all frontends. Backend is now the sole auth authority using JWTs, bcrypt, and Africa's Talking SMS.
 
-- Backend: `authjwt/` (JWT HS256), `authpassword/` (bcrypt), `sms/africastalking/` — all behind interfaces for microservice extraction
-- Backend: new endpoints `POST /api/auth/send-phone-otp`, `POST /api/auth/verify-phone-otp`, `POST /api/auth/admin/login`, `POST /api/auth/refresh`, `POST /api/auth/logout`
-- Backend: migration drops `firebase_uid`, adds `phone_otps`, `refresh_tokens`, `password_hash` on admins
-- Backend: `cmd/create-admin` CLI tool for seeding admins
-- Mobile: remove `@react-native-firebase/*`, use `expo-secure-store` for tokens, backend-driven OTP flow
-- Admin: remove `firebase` web SDK, use localStorage for tokens, backend-driven auth
+- **Backend: authjwt package** — `internal/authjwt/service.go` (TokenService interface + HS256 impl), `token_util.go`, `service_test.go`
+- **Backend: authpassword package** — `internal/authpassword/hasher.go` (Hasher interface), `bcrypt.go`, `hasher_test.go`
+- **Backend: sms package** — `internal/sms/sender.go` (Sender interface)
+- **Backend: sms/africastalking** — `client.go` (impl with HTTPDoer), `client_test.go`
+- **Backend: sms/discord** — `client.go` (webhook-based Sender impl), `client_test.go`; sends OTP as Discord embed
+- **Backend: Config** — `SMS_PROVIDER` env var (`discord` or `africastalking`), `DISCORD_WEBHOOK_URL`, `DISCORD_BOT_USERNAME`
+- **Backend: server.go** — switch on `SMS_PROVIDER` config to wire discord or africastalking Sender
+- **Backend: Migration 000004** — drops `firebase_uid` from `users` and `admins`, adds `password_hash` to `admins`, creates `phone_otps` and `refresh_tokens` tables with indexes
+- **Backend: sqlc queries** — rewrote users.sql, admins.sql; new phone_otps.sql, refresh_tokens.sql
+- **Backend: Auth handler** — SendPhoneOTP, VerifyPhoneOTP, AdminLogin, RefreshToken, Logout, CheckInvitation, SendEmailOTP, VerifyEmailOTP
+- **Backend: JWTAuth middleware** — RequireAdmin/RequireActiveUser using subject_id/subject_type from JWT claims
+- **Backend: Routes** — handleUserMe/handleAdminMe using UUID from JWT claims
+- **Backend: CLI tool** — `cmd/create-admin/main.go` accepts --email and --password
+- **Mobile: lib/auth.ts** — token storage via expo-secure-store (getAccessToken, getRefreshToken, setTokens, clearTokens)
+- **Mobile: lib/api.ts** — axios interceptor attaches Bearer token, 401 response interceptor does token refresh with rotation
+- **Mobile: providers/auth-provider.tsx** — token-based auth context, exposes {user, loading, signOut, refreshUser}
+- **Mobile: Login & verify screens** — backend OTP flow, calls refreshUser after setTokens
+- **Mobile: Firebase fully removed** — uninstalled @react-native-firebase/*, firebase; deleted google-services.json, GoogleService-Info.plist, native plugin files
+- **Admin: Firebase fully removed** — deleted lib/firebase.ts, uninstalled firebase package
+- **Admin: lib/auth.ts** — localStorage token storage (getAccessToken, getRefreshToken, setTokens, clearTokens)
+- **Admin: lib/api.ts** — axios interceptor with Bearer token + refresh rotation; redirects to /login on 401
+- **Admin: auth-provider.tsx** — token-based auth context; tries /api/admin/me then /api/users/me; exposes {user, admin, subjectType, loading, signOut, refreshSubject}
+- **Admin: login/admin/page.tsx** — POST /api/auth/admin/login with email/password
+- **Admin: login/page.tsx** — POST /api/auth/send-phone-otp + verify-phone-otp flow
+- **Admin: auth-guard.tsx** — checks subjectType from auth context, no Firebase
+- **All tests passing** — backend (8 suites), admin (63 tests), mobile (26 tests); lint + typecheck clean
 
 ## Epic 3: Pilot Launch (Future)
 

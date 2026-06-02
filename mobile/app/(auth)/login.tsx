@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "expo-router";
 import {
   View,
@@ -16,7 +16,13 @@ import { useAuth } from "@/src/providers/auth-provider";
 
 export default function LoginScreen() {
   const router = useRouter();
-  const { user } = useAuth();
+  const { user, refreshUser } = useAuth();
+
+  useEffect(() => {
+    if (user) {
+      router.replace("/(app)/home");
+    }
+  }, [user, router]);
 
   const [countryCode, setCountryCode] = useState("+237");
   const [loginPhone, setLoginPhone] = useState("");
@@ -28,11 +34,6 @@ export default function LoginScreen() {
 
   const fullPhone = `${countryCode}${loginPhone}`;
   const isValidPhone = (phone: string) => /^\+[1-9]\d{6,14}$/.test(phone);
-
-  if (user) {
-    router.replace("/(app)/home");
-    return null;
-  }
 
   const handleSendCode = async () => {
     setLoginError("");
@@ -73,6 +74,7 @@ export default function LoginScreen() {
         code: loginOtp,
       });
       await setTokens(data.data.access_token, data.data.refresh_token);
+      await refreshUser();
       router.replace("/(app)/home");
     } catch (err: unknown) {
       if (err && typeof err === "object" && "response" in err && err.response && typeof err.response === "object" && "data" in err.response) {

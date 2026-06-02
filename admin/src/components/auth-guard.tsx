@@ -7,14 +7,14 @@ import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 
 export function AuthGuard({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuth();
+  const { subjectType, loading } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
-    if (!loading && !user) {
+    if (!loading && !subjectType) {
       router.push("/login");
     }
-  }, [user, loading, router]);
+  }, [subjectType, loading, router]);
 
   if (loading) {
     return (
@@ -24,8 +24,12 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (!user) {
+  if (!subjectType) {
     return null;
+  }
+
+  if (subjectType !== "admin") {
+    return <ForbiddenPage backHref="/login" backLabel="Go to Login" />;
   }
 
   return (

@@ -5,6 +5,7 @@ import ClientHomePage from "../page";
 
 const mockPush = jest.fn();
 const mockReplace = jest.fn();
+const mockSignOut = jest.fn();
 
 jest.mock("next/navigation", () => ({
   useRouter: () => ({ push: mockPush, replace: mockReplace }),
@@ -18,8 +19,8 @@ jest.mock("@/hooks/use-advance", () => ({
   useCreateAdvanceRequest: jest.fn(),
 }));
 
-jest.mock("@/lib/firebase", () => ({
-  auth: { signOut: jest.fn() },
+jest.mock("@/components/providers", () => ({
+  useAuth: jest.fn(),
 }));
 
 jest.mock("@/lib/api", () => ({
@@ -28,6 +29,7 @@ jest.mock("@/lib/api", () => ({
 
 const { useUser } = jest.requireMock("@/hooks/use-user");
 const { useCreateAdvanceRequest } = jest.requireMock("@/hooks/use-advance");
+const { useAuth } = jest.requireMock("@/components/providers");
 
 function renderWithProviders(ui: React.ReactElement) {
   const queryClient = new QueryClient({
@@ -50,7 +52,7 @@ const mockUser = {
   is_terms_accepted: true,
   email_verified: true,
   phone_verified: true,
-  firebase_uid: "fb-uid-1",
+  password_hash: "$2a$10$hashed",
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
 };
@@ -68,6 +70,9 @@ describe("ClientHomePage", () => {
       isPending: false,
       isError: false,
       error: null,
+    });
+    useAuth.mockReturnValue({
+      signOut: mockSignOut,
     });
   });
 
@@ -181,7 +186,6 @@ describe("ClientHomePage", () => {
 
   it("signs out when menu item is clicked", async () => {
     const user = userEvent.setup();
-    const { auth } = jest.requireMock("@/lib/firebase");
 
     renderWithProviders(<ClientHomePage />);
     const menuBtn = screen.getByTestId("menu-button");
@@ -190,7 +194,7 @@ describe("ClientHomePage", () => {
     const signOutItem = screen.getByTestId("signout-menu-item");
     await user.click(signOutItem);
 
-    expect(auth.signOut).toHaveBeenCalled();
+    expect(mockSignOut).toHaveBeenCalled();
     expect(mockReplace).toHaveBeenCalledWith("/login");
   });
 });

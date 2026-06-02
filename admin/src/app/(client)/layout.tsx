@@ -19,23 +19,23 @@ export default function ClientLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const { user: firebaseUser, loading: authLoading } = useAuth();
-  const firebaseReady = !authLoading && !!firebaseUser;
+  const { subjectType, loading: authLoading } = useAuth();
+  const authenticated = !authLoading && !!subjectType;
   const {
     data: backendUser,
     isLoading: userLoading,
     isError: userError,
     error,
-  } = useUser(firebaseReady);
+  } = useUser(subjectType === "user");
   const router = useRouter();
 
   useEffect(() => {
-    if (!authLoading && !firebaseUser) {
+    if (!authLoading && !subjectType) {
       router.replace("/login");
     }
-  }, [firebaseUser, authLoading, router]);
+  }, [subjectType, authLoading, router]);
 
-  if (authLoading || (firebaseReady && userLoading)) {
+  if (authLoading || (authenticated && subjectType === "user" && userLoading)) {
     return (
       <div className="flex h-screen items-center justify-center">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -43,8 +43,12 @@ export default function ClientLayout({
     );
   }
 
-  if (!firebaseUser) {
+  if (!subjectType) {
     return null;
+  }
+
+  if (subjectType === "admin") {
+    return <ForbiddenPage backHref="/login/admin" backLabel="Go to Admin Login" />;
   }
 
   if (userError && isRoleMismatchError(error)) {

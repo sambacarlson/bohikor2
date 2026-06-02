@@ -8,10 +8,13 @@ Bohikor2 is a salary advance pilot app. Employees can request a one-time 10,000 
 
 Users who have completed authentication (Epic 1) can now request an advance and receive funds. Admins can monitor requests.
 
-## Auth (Epic 1 — Complete)
+## Auth (Epic 1 — Complete, Epic 2.5 — Own Auth)
 
-- **Admin:** Email/password via Firebase → verified against `admins` table → dashboard with Invite + Users
-- **Mobile:** Phone login (returning) or email invite → email OTP → phone OTP → user created → home
+- **Admin:** Email/password login → backend bcrypt verification → JWT access token (15min) + refresh token (30 days with rotation) → dashboard with Invite + Users
+- **Mobile:** Phone number → backend sends OTP (Africa's Talking SMS or Discord webhook in dev) → verify OTP → JWT tokens → home
+- **Mobile (New user):** Enter invited email → `GET /api/auth/check-invite` → `POST /api/auth/send-email-otp` → verify email OTP → enter phone → Firebase-style phone OTP flow → home
+- **Tokens:** HS256 JWT access tokens (15min) + opaque refresh tokens (30 days) with rotation. Stored in expo-secure-store (mobile) or localStorage (admin).
+- **No Firebase dependency** — removed from all frontends and backend. Backend is sole auth authority.
 
 ## Request Flow (Epic 2 — Complete)
 

@@ -12,10 +12,12 @@ import {
 } from "react-native";
 import { api } from "@/src/lib/api";
 import { setTokens } from "@/src/lib/auth";
+import { useAuth } from "@/src/providers/auth-provider";
 
 export default function VerifyPhoneScreen() {
   const router = useRouter();
   const { email } = useLocalSearchParams<{ email: string }>();
+  const { refreshUser } = useAuth();
 
   const [countryCode, setCountryCode] = useState("+237");
   const [phoneNumber, setPhoneNumber] = useState("");
@@ -68,6 +70,7 @@ export default function VerifyPhoneScreen() {
         email,
       });
       await setTokens(data.data.access_token, data.data.refresh_token);
+      await refreshUser();
       router.replace("/(app)/home");
     } catch (err: unknown) {
       if (err && typeof err === "object" && "response" in err && err.response && typeof err.response === "object" && "data" in err.response) {

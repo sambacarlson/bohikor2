@@ -20,10 +20,10 @@ import (
 )
 
 type AuthHandler struct {
-	queries      authQuerier
-	tokenService authjwt.TokenService
-	hasher       authpassword.Hasher
-	smsSender    sms.Sender
+	queries       authQuerier
+	tokenService  authjwt.TokenService
+	hasher        authpassword.Hasher
+	smsSender     sms.Sender
 	refreshExpiry time.Duration
 }
 
@@ -57,11 +57,11 @@ func NewAuthHandler(
 	refreshExpiry time.Duration,
 ) *AuthHandler {
 	return &AuthHandler{
-		queries:        queries,
-		tokenService:   tokenService,
-		hasher:         hasher,
-		smsSender:      smsSender,
-		refreshExpiry:  refreshExpiry,
+		queries:       queries,
+		tokenService:  tokenService,
+		hasher:        hasher,
+		smsSender:     smsSender,
+		refreshExpiry: refreshExpiry,
 	}
 }
 

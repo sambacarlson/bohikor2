@@ -26,9 +26,9 @@ type Config struct {
 
 	// Africa's Talking SMS
 	AfricasTalkingAPIKey   string `env:"AFRICASTALKING_API_KEY" envDefault:""`
-	AfricasTalkingUsername  string `env:"AFRICASTALKING_USERNAME" envDefault:"sandbox"`
+	AfricasTalkingUsername string `env:"AFRICASTALKING_USERNAME" envDefault:"sandbox"`
 	AfricasTalkingSenderID string `env:"AFRICASTALKING_SENDER_ID" envDefault:""`
-	AfricasTalkingBaseURL   string `env:"AFRICASTALKING_BASE_URL" envDefault:"https://api.sandbox.africastalking.com/v1"`
+	AfricasTalkingBaseURL  string `env:"AFRICASTALKING_BASE_URL" envDefault:"https://api.sandbox.africastalking.com/v1"`
 
 	// Campay
 	CampayPermanentAccessToken string `env:"CAMPAY_PERMANENT_ACCESS_TOKEN" envDefault:""`

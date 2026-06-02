@@ -47,11 +47,11 @@ type discordWebhookPayload struct {
 }
 
 type discordEmbed struct {
-	Title       string            `json:"title"`
-	Description string            `json:"description"`
-	Color       int               `json:"color"`
-	Fields      []discordField    `json:"fields"`
-	Timestamp   string            `json:"timestamp"`
+	Title       string         `json:"title"`
+	Description string         `json:"description"`
+	Color       int            `json:"color"`
+	Fields      []discordField `json:"fields"`
+	Timestamp   string         `json:"timestamp"`
 }
 
 type discordField struct {
@@ -93,7 +93,7 @@ func (c *client) SendOTP(ctx context.Context, phoneNumber string, code string) e
 	if err != nil {
 		return fmt.Errorf("send discord webhook: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, _ := io.ReadAll(resp.Body)
 

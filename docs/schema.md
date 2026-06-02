@@ -91,29 +91,34 @@ CREATE INDEX idx_email_otps_expires_at ON email_otps (expires_at);
 CREATE TABLE phone_otps (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     phone_number TEXT NOT NULL,
-    code_hash TEXT NOT NULL,
+    code TEXT NOT NULL,
     expires_at TIMESTAMPTZ NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_phone_otps_phone ON phone_otps (phone_number);
+CREATE INDEX idx_phone_otps_phone_number ON phone_otps (phone_number);
+CREATE INDEX idx_phone_otps_expires_at ON phone_otps (expires_at);
 ```
+
+> OTP codes are stored as plaintext (short-lived, 15min expiry, deleted after verification). Not hashed.
 
 ### Refresh Tokens
 
 ```sql
 CREATE TABLE refresh_tokens (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
-    token_hash TEXT UNIQUE NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    subject_id UUID NOT NULL,
+    subject_type TEXT NOT NULL CHECK (subject_type IN ('user', 'admin')),
     expires_at TIMESTAMPTZ NOT NULL,
-    revoked_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_refresh_tokens_user_id ON refresh_tokens (user_id);
 CREATE INDEX idx_refresh_tokens_token_hash ON refresh_tokens (token_hash);
+CREATE INDEX idx_refresh_tokens_subject ON refresh_tokens (subject_id, subject_type);
 ```
+
+> Polymorphic `subject_id`/`subject_type` pattern so refresh tokens serve both users and admins.
 
 ### Events
 
@@ -168,6 +173,6 @@ CREATE INDEX idx_advance_requests_user_id ON advance_requests (user_id);
 | Question | Resolution |
 | :--- | :--- |
 | **Invitation expiry** | No automatic expiry. Valid until accepted or revoked. |
-| **Phone verification** | Africa's Talking SMS OTP. Phone is primary identity. |
+| **Phone verification** | Africa's Talking SMS OTP (Discord webhook in dev). Phone is primary identity. |
 | **Data retention** | Indefinite. |
 | **Terms acceptance** | Stored on `users` table. Must be accepted before requesting advance. Separate from auth flow. |

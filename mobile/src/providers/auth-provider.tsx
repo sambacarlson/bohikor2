@@ -7,7 +7,7 @@ import {
   type ReactNode,
 } from "react";
 import { api } from "@/src/lib/api";
-import { getAccessToken, setTokens, clearTokens } from "@/src/lib/auth";
+import { getAccessToken, clearTokens } from "@/src/lib/auth";
 import type { User } from "@/src/types";
 
 interface AuthContextType {

@@ -39,9 +39,12 @@ const mockUser = {
   is_terms_accepted: false,
   status: "active",
   phone_number: "+237671234567",
-  firebase_uid: "fb-uid",
   email_verified: true,
   phone_verified: true,
+  full_name: null,
+  terms_accepted_at: null,
+  terms_version: null,
+  user_ip_at_consent: null,
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
 };

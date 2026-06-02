@@ -29,7 +29,7 @@ func TestSendOTP_Success(t *testing.T) {
 		}
 
 		w.WriteHeader(http.StatusCreated)
-		w.Write([]byte(`{"SMSMessageData":{"message":"Sent","recipients":[{"statusCode":101,"number":"+237612345678","status":"Success"}]}}`))
+		_, _ = w.Write([]byte(`{"SMSMessageData":{"message":"Sent","recipients":[{"statusCode":101,"number":"+237612345678","status":"Success"}]}}`))
 	}))
 	defer server.Close()
 
@@ -44,7 +44,7 @@ func TestSendOTP_Success(t *testing.T) {
 func TestSendOTP_ServerError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(`{"error":"internal"}`))
+		_, _ = w.Write([]byte(`{"error":"internal"}`))
 	}))
 	defer server.Close()
 

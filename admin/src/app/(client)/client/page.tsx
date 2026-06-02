@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { auth } from "@/lib/firebase";
+import { useAuth } from "@/components/providers";
 import { getApiErrorMessage } from "@/lib/api";
 import { useUser } from "@/hooks/use-user";
 import { useCreateAdvanceRequest } from "@/hooks/use-advance";
@@ -33,6 +33,7 @@ import Link from "next/link";
 
 export default function ClientHomePage() {
   const router = useRouter();
+  const { signOut } = useAuth();
   const { data: user } = useUser();
   const createRequest = useCreateAdvanceRequest();
   const [showConfirm, setShowConfirm] = useState(false);
@@ -43,7 +44,7 @@ export default function ClientHomePage() {
   const termsAccepted = user?.is_terms_accepted ?? false;
 
   const handleSignOut = async () => {
-    await auth.signOut();
+    await signOut();
     router.replace("/login");
   };
 

@@ -1,73 +1,47 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import LoginPage from "../page";
 
 const mockPush = jest.fn();
 const mockReplace = jest.fn();
+const mockRefreshSubject = jest.fn();
 
 jest.mock("next/navigation", () => ({
   useRouter: () => ({ push: mockPush, replace: mockReplace }),
-}));
-
-jest.mock("@/hooks/use-user", () => ({
-  useUser: jest.fn(),
 }));
 
 jest.mock("@/components/providers", () => ({
   useAuth: jest.fn(),
 }));
 
-const sendCodeMock = jest.fn();
-
-jest.mock("firebase/auth", () => ({
-  RecaptchaVerifier: jest.fn().mockImplementation(() => ({
-    clear: jest.fn(),
-  })),
-  signInWithPhoneNumber: jest.fn().mockImplementation(() => sendCodeMock()),
+jest.mock("@/lib/api", () => ({
+  api: {
+    post: jest.fn(),
+  },
 }));
 
-jest.mock("@/lib/firebase", () => ({
-  auth: {},
+jest.mock("@/lib/auth", () => ({
+  setTokens: jest.fn(),
 }));
 
-const { useUser } = jest.requireMock("@/hooks/use-user");
 const { useAuth } = jest.requireMock("@/components/providers");
-const { signInWithPhoneNumber } = jest.requireMock("firebase/auth");
-
-function renderWithProviders(ui: React.ReactElement) {
-  const queryClient = new QueryClient({
-    defaultOptions: {
-      queries: { retry: false },
-      mutations: { retry: false },
-    },
-  });
-  return render(
-    <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>
-  );
-}
+const { api } = jest.requireMock("@/lib/api");
 
 describe("LoginPage", () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    useUser.mockReturnValue({
-      data: null,
-      isLoading: false,
-      isFetched: false,
-      refetch: jest.fn(),
-    });
     useAuth.mockReturnValue({
       user: null,
+      admin: null,
+      subjectType: null,
       loading: false,
-    });
-    sendCodeMock.mockResolvedValue({});
-    signInWithPhoneNumber.mockResolvedValue({
-      confirm: jest.fn().mockResolvedValue({}),
+      signOut: jest.fn(),
+      refreshSubject: mockRefreshSubject,
     });
   });
 
   it("renders phone input and continue button", () => {
-    renderWithProviders(<LoginPage />);
+    render(<LoginPage />);
     expect(screen.getByText("Bohikor2")).toBeInTheDocument();
     expect(screen.getByText("Salary Advance Pilot")).toBeInTheDocument();
     expect(
@@ -77,76 +51,63 @@ describe("LoginPage", () => {
   });
 
   it("shows login as admin link", () => {
-    renderWithProviders(<LoginPage />);
+    render(<LoginPage />);
     expect(screen.getByText("Login as admin")).toBeInTheDocument();
   });
 
   it("disables continue button when phone is empty", () => {
-    renderWithProviders(<LoginPage />);
+    render(<LoginPage />);
     const continueBtn = screen.getByText("Continue");
     expect(continueBtn).toBeDisabled();
   });
 
-  it("sends code when phone is entered", async () => {
+  it("sends OTP when phone is entered", async () => {
+    api.post.mockResolvedValue({ data: {} });
+
     const user = userEvent.setup();
-    renderWithProviders(<LoginPage />);
-    const input = screen.getByPlaceholderText(/e.g. 671234567/);
-    await user.type(input, "671234567");
+    render(<LoginPage />);
+    await user.type(screen.getByPlaceholderText(/e.g. 671234567/), "671234567");
+    await user.click(screen.getByText("Continue"));
 
-    const continueBtn = screen.getByText("Continue");
-    await user.click(continueBtn);
-
-    expect(signInWithPhoneNumber).toHaveBeenCalled();
+    expect(api.post).toHaveBeenCalledWith("/api/auth/send-phone-otp", {
+      phone_number: "+237671234567",
+    });
   });
 
   it("shows OTP step after code sent", async () => {
+    api.post.mockResolvedValue({ data: {} });
+
     const user = userEvent.setup();
-    const mockConfirm = jest.fn().mockResolvedValue({});
-    signInWithPhoneNumber.mockResolvedValue({
-      confirm: mockConfirm,
-    });
-
-    renderWithProviders(<LoginPage />);
-    const input = screen.getByPlaceholderText(/e.g. 671234567/);
-    await user.type(input, "671234567");
-
-    const continueBtn = screen.getByText("Continue");
-    await user.click(continueBtn);
+    render(<LoginPage />);
+    await user.type(screen.getByPlaceholderText(/e.g. 671234567/), "671234567");
+    await user.click(screen.getByText("Continue"));
 
     expect(screen.getByText("Verification Code")).toBeInTheDocument();
-    expect(
-      screen.getByPlaceholderText("000000")
-    ).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("000000")).toBeInTheDocument();
   });
 
   it("shows error when code sending fails", async () => {
+    api.post.mockRejectedValue({
+      response: { data: { error: "Failed to send verification code." } },
+    });
+
     const user = userEvent.setup();
-    signInWithPhoneNumber.mockRejectedValue(new Error("invalid-phone-number"));
-
-    renderWithProviders(<LoginPage />);
-    const input = screen.getByPlaceholderText(/e.g. 671234567/);
-    await user.type(input, "600000000");
-
-    const continueBtn = screen.getByText("Continue");
-    await user.click(continueBtn);
+    render(<LoginPage />);
+    await user.type(screen.getByPlaceholderText(/e.g. 671234567/), "600000000");
+    await user.click(screen.getByText("Continue"));
 
     expect(
-      screen.getByText("Invalid phone number. Please check and try again.")
+      screen.getByText("Failed to send verification code.")
     ).toBeInTheDocument();
   });
 
   it("shows change phone number link in OTP step", async () => {
+    api.post.mockResolvedValue({ data: {} });
+
     const user = userEvent.setup();
-    signInWithPhoneNumber.mockResolvedValue({
-      confirm: jest.fn().mockResolvedValue({}),
-    });
-
-    renderWithProviders(<LoginPage />);
-    const input = screen.getByPlaceholderText(/e.g. 671234567/);
-    await user.type(input, "671234567");
-
-    const continueBtn = screen.getByText("Continue");
-    await user.click(continueBtn);
+    render(<LoginPage />);
+    await user.type(screen.getByPlaceholderText(/e.g. 671234567/), "671234567");
+    await user.click(screen.getByText("Continue"));
 
     expect(
       screen.getByText("Change phone number")

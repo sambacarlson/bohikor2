@@ -2,13 +2,14 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react-nativ
 import TermsScreen from "@/app/(app)/terms";
 
 const mockRouter = { back: jest.fn(), push: jest.fn() };
-const mockBackendUser = {
+const mockRefreshUser = jest.fn();
+
+const mockUser = {
   id: "user-1",
   email: "test@example.com",
   email_verified: true,
-  firebase_uid: "fb-1",
   full_name: "Test User",
-  phone_number: "237600000000",
+  phone_number: "+237600000000",
   phone_verified: true,
   status: "active" as const,
   is_terms_accepted: false,
@@ -25,11 +26,10 @@ jest.mock("expo-router", () => ({
 
 jest.mock("@/src/providers/auth-provider", () => ({
   useAuth: () => ({
-    backendUser: mockBackendUser,
-    firebaseUser: null,
+    user: mockUser,
     loading: false,
     signOut: jest.fn(),
-    refreshBackendUser: jest.fn().mockResolvedValue(undefined),
+    refreshUser: mockRefreshUser,
   }),
 }));
 
@@ -47,6 +47,7 @@ jest.mock("@/src/hooks/use-advance", () => ({
 describe("TermsScreen", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockUser.is_terms_accepted = false;
   });
 
   it("renders terms text and checkbox", () => {
@@ -83,9 +84,9 @@ describe("TermsScreen", () => {
 
 describe("TermsScreen - already accepted", () => {
   it("shows already accepted message when terms are accepted", () => {
-    mockBackendUser.is_terms_accepted = true;
+    mockUser.is_terms_accepted = true;
     render(<TermsScreen />);
     expect(screen.getByText("Terms Already Accepted")).toBeTruthy();
-    mockBackendUser.is_terms_accepted = false;
+    mockUser.is_terms_accepted = false;
   });
 });

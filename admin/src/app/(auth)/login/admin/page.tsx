@@ -2,8 +2,8 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { signInWithEmailAndPassword } from "firebase/auth";
-import { auth } from "@/lib/firebase";
+import { api } from "@/lib/api";
+import { setTokens } from "@/lib/auth";
 import { useAuth } from "@/components/providers";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,29 +21,17 @@ import Link from "next/link";
 
 export default function AdminLoginPage() {
   const router = useRouter();
-  const { user: firebaseUser, loading: authLoading } = useAuth();
+  const { admin, refreshSubject } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (!authLoading && firebaseUser) {
+    if (admin) {
       router.replace("/admin");
     }
-  }, [authLoading, firebaseUser, router]);
-
-  if (authLoading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-muted/50">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
-      </div>
-    );
-  }
-
-  if (firebaseUser) {
-    return null;
-  }
+  }, [admin, router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -51,15 +39,15 @@ export default function AdminLoginPage() {
     setLoading(true);
 
     try {
-      await signInWithEmailAndPassword(auth, email, password);
+      const { data } = await api.post("/api/auth/admin/login", { email, password });
+      await setTokens(data.data.access_token, data.data.refresh_token);
+      await refreshSubject();
       toast.success("Signed in successfully");
       router.push("/admin");
     } catch (err: unknown) {
       const message =
-        err instanceof Error && "code" in err
-          ? (err as { code: string }).code === "auth/invalid-credential"
-            ? "Invalid email or password"
-            : err.message
+        err && typeof err === "object" && "response" in err
+          ? (err as { response?: { data?: { error?: string } } }).response?.data?.error || "Invalid email or password"
           : "Failed to sign in";
       setError(message);
       toast.error("Sign in failed");

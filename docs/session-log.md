@@ -1,5 +1,53 @@
 # Session Log
 
+## 2026-06-02 — Epic 2.5: Firebase removal, own auth migration (Complete)
+
+### What we did
+- **Backend: authjwt package** — `internal/authjwt/service.go` (TokenService interface + HS256 impl), `token_util.go`, `service_test.go`
+- **Backend: authpassword package** — `internal/authpassword/hasher.go` (Hasher interface), `bcrypt.go`, `hasher_test.go`
+- **Backend: sms package** — `internal/sms/sender.go` (Sender interface); `sms/africastalking/client.go` (production SMS via Africa's Talking); `sms/discord/client.go` (dev SMS via Discord webhook with embed)
+- **Backend: Config** — `SMS_PROVIDER` env var (`discord`/`africastalking`, default `discord`), `DISCORD_WEBHOOK_URL`, `DISCORD_BOT_USERNAME`
+- **Backend: server.go** — switch on `SMS_PROVIDER` to wire discord or africastalking Sender
+- **Backend: Migration 000004** — drops `firebase_uid` from `users` and `admins`, adds `password_hash` to `admins`, creates `phone_otps` and `refresh_tokens` tables
+- **Backend: sqlc queries** — rewrote users.sql, admins.sql; new phone_otps.sql, refresh_tokens.sql
+- **Backend: Auth handler** — SendPhoneOTP, VerifyPhoneOTP, AdminLogin, RefreshToken, Logout, CheckInvitation, SendEmailOTP, VerifyEmailOTP
+- **Backend: JWTAuth middleware** — RequireAdmin/RequireActiveUser using subject_id/subject_type from JWT claims
+- **Backend: Routes** — handleUserMe/handleAdminMe using UUID from JWT `sub` claim
+- **Backend: CLI tool** — `cmd/create-admin/main.go` accepts --email and --password (replaces seed data)
+- **Mobile: lib/auth.ts** — token storage via expo-secure-store (~15.0.8 for SDK 54)
+- **Mobile: lib/api.ts** — axios interceptor attaches Bearer token, 401 response interceptor does refresh with rotation
+- **Mobile: providers/auth-provider.tsx** — token-based auth context exposing {user, loading, signOut, refreshUser}
+- **Mobile: All auth screens** — login.tsx, verify-phone.tsx, home.tsx, terms.tsx use useAuth() instead of Firebase
+- **Mobile: Firebase fully removed** — uninstalled @react-native-firebase/*, firebase; deleted google-services.json, GoogleService-Info.plist, native plugin; removed expo plugin from app.json
+- **Admin: Firebase fully removed** — deleted lib/firebase.ts, uninstalled firebase package, removed Firebase env vars
+- **Admin: lib/auth.ts** — localStorage token storage
+- **Admin: lib/api.ts** — axios interceptor with Bearer token + refresh rotation; redirects to /login on 401
+- **Admin: auth-provider.tsx** — token-based auth context; tries /api/admin/me then /api/users/me; exposes {user, admin, subjectType, loading, signOut, refreshSubject}
+- **Admin: login/admin/page.tsx** — email/password via POST /api/auth/admin/login
+- **Admin: login/page.tsx** — phone OTP via POST /api/auth/send-phone-otp + verify-phone-otp
+- **Admin: auth-guard.tsx, sidebar.tsx, forbidden.tsx, client layout** — all use useAuth() instead of Firebase
+- **Admin: All 63 tests passing** — rewritten to mock @/lib/api and @/lib/auth instead of firebase
+- **Mobile: All 26 tests passing** — rewritten home.test.tsx and terms.test.tsx to mock useAuth from auth-provider
+- **All lint + typecheck clean** — backend, admin, mobile
+
+### Key decisions
+- Dropped `firebase_uid` entirely (no prod data, wipe OK) rather than making nullable
+- No admin seed data — `cmd/create-admin` CLI tool only
+- Discord webhook for dev OTP delivery, Africa's Talking for production, controlled by `SMS_PROVIDER` env var
+- Token strategy: HS256 JWT access tokens (15min) + opaque refresh tokens (30 days) with rotation
+- Backend identifies users by UUID `sub` claim in JWT, not Firebase UID
+- All auth concerns behind Go interfaces (TokenService, Hasher, Sender) for future microservice extraction
+- Phone OTPs stored as plaintext `code` (not hashed) — short-lived, 15min expiry, deleted on verification
+- Refresh tokens use polymorphic `subject_id`/`subject_type` pattern (supports both users and admins)
+- Mobile uses `useEffect` for auth-based redirects (not render-time `router.replace()`) to avoid React setState-during-render errors
+- `expo-secure-store` must be ~15.0.8 for SDK 54 — version 56.x causes native module crash
+
+### Key lessons
+- Always run `npx expo install --fix` then `npx expo prebuild --clean` when changing native modules
+- React strict linter rejects `router.replace()` during render — always use `useEffect` for navigation based on auth state
+- Admin auth-provider needs `useEffect` for initial fetch with eslint-disable for set-state-in-effect (it's initialization, not a side effect driven by deps)
+- `golangci-lint` catches `w.Write` unchecked error returns and misspellings — fix early
+
 ## 2026-05-27 — Client web app, role-based access control, audit & fixes
 
 ### What we did

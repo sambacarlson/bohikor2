@@ -53,7 +53,7 @@ type atMessage struct {
 
 type atResponse struct {
 	SMSMessageData struct {
-		Message string `json:"message"`
+		Message    string `json:"message"`
 		Recipients []struct {
 			StatusCode int    `json:"statusCode"`
 			Number     string `json:"number"`
@@ -87,7 +87,7 @@ func (c *client) SendOTP(ctx context.Context, phoneNumber string, code string) e
 	if err != nil {
 		return fmt.Errorf("send sms: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -95,13 +95,13 @@ func (c *client) SendOTP(ctx context.Context, phoneNumber string, code string) e
 	}
 
 	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
-		slog.Error("africas-talking sms failed", "status", resp.StatusCode, "body", string(respBody))
+		slog.Error("africastalking sms failed", "status", resp.StatusCode, "body", string(respBody))
 		return fmt.Errorf("sms send failed with status %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	var atResp atResponse
 	if err := json.Unmarshal(respBody, &atResp); err != nil {
-		slog.Warn("could not parse africas-talking response", "error", err)
+		slog.Warn("could not parse africastalking response", "error", err)
 		return nil
 	}
 
