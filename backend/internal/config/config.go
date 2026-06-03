@@ -6,6 +6,7 @@ import (
 
 	"github.com/caarlos0/env/v11"
 	"github.com/joho/godotenv"
+	"github.com/shopspring/decimal"
 )
 
 type Config struct {
@@ -17,23 +18,11 @@ type Config struct {
 	JWTSecret       string        `env:"JWT_SECRET" envDefault:"change-me-in-production-at-least-32-chars"`
 	JWTAccessExpiry time.Duration `env:"JWT_ACCESS_EXPIRY" envDefault:"15m"`
 
-	// SMS Provider: "discord" or "africastalking"
-	SMSProvider string `env:"SMS_PROVIDER" envDefault:"discord"`
-
-	// Discord SMS (OTP delivered via webhook for dev/testing)
-	DiscordWebhookURL  string `env:"DISCORD_WEBHOOK_URL" envDefault:""`
-	DiscordBotUsername string `env:"DISCORD_BOT_USERNAME" envDefault:"Bohikor OTP"`
-
-	// Africa's Talking SMS
-	AfricasTalkingAPIKey   string `env:"AFRICASTALKING_API_KEY" envDefault:""`
-	AfricasTalkingUsername string `env:"AFRICASTALKING_USERNAME" envDefault:"sandbox"`
-	AfricasTalkingSenderID string `env:"AFRICASTALKING_SENDER_ID" envDefault:""`
-	AfricasTalkingBaseURL  string `env:"AFRICASTALKING_BASE_URL" envDefault:"https://api.sandbox.africastalking.com/v1"`
-
 	// Campay
-	CampayPermanentAccessToken string `env:"CAMPAY_PERMANENT_ACCESS_TOKEN" envDefault:""`
-	CampayWebhookSecret        string `env:"CAMPAY_WEBHOOK_SECRET" envDefault:""`
-	CampayBaseURL              string `env:"CAMPAY_BASE_URL" envDefault:"https://demo.campay.net/api"`
+	CampayPermanentAccessToken    string          `env:"CAMPAY_PERMANENT_ACCESS_TOKEN" envDefault:""`
+	CampayWebhookSecret           string          `env:"CAMPAY_WEBHOOK_SECRET" envDefault:""`
+	CampayBaseURL                 string          `env:"CAMPAY_BASE_URL" envDefault:"https://demo.campay.net/api"`
+	CampayPhoneVerificationAmount decimal.Decimal `env:"CAMPAY_PHONE_VERIFICATION_AMOUNT" envDefault:"100"`
 
 	// Resend
 	ResendAPIKey string `env:"RESEND_API_KEY" envDefault:""`

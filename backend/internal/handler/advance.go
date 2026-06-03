@@ -49,10 +49,6 @@ func NewAdvanceHandler(queries advanceQuerier, campayClient campayTransferer, ad
 	}
 }
 
-type createRequest struct {
-	PhoneNumber string `json:"phone_number" binding:"required"`
-}
-
 func (h *AdvanceHandler) CreateRequest(c *gin.Context) {
 	val, exists := c.Get("user_id")
 	if !exists {
@@ -62,12 +58,6 @@ func (h *AdvanceHandler) CreateRequest(c *gin.Context) {
 	userID, ok := val.(uuid.UUID)
 	if !ok {
 		JSONError(c, http.StatusInternalServerError, "internal_error", "invalid user ID")
-		return
-	}
-
-	var req createRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		JSONError(c, http.StatusBadRequest, "invalid_request", "phone_number is required")
 		return
 	}
 
@@ -81,6 +71,11 @@ func (h *AdvanceHandler) CreateRequest(c *gin.Context) {
 
 	if !user.IsTermsAccepted {
 		JSONError(c, http.StatusForbidden, "terms_not_accepted", "you must accept the terms before requesting an advance")
+		return
+	}
+
+	if !user.PhoneVerified || !user.PhoneNumber.Valid || user.PhoneNumber.String == "" {
+		JSONError(c, http.StatusForbidden, "phone_not_verified", "you must verify your phone number before requesting an advance")
 		return
 	}
 
@@ -117,7 +112,7 @@ func (h *AdvanceHandler) CreateRequest(c *gin.Context) {
 		slog.Error("convert advance amount", "error", err)
 		amountDec = decimal.NewFromInt(10000)
 	}
-	transferResp, transferErr := h.campayClient.InitiateTransfer(ctx, req.PhoneNumber, amountDec, description, newReq.ID.String())
+	transferResp, transferErr := h.campayClient.InitiateTransfer(ctx, user.PhoneNumber.String, amountDec, description, newReq.ID.String())
 
 	if transferErr != nil {
 		slog.Error("campay transfer failed", "error", transferErr, "request_id", newReq.ID)
@@ -257,6 +252,9 @@ func HandleListAdminRequests(q adminRequestsQuerier) gin.HandlerFunc {
 type webhookQuerier interface {
 	GetAdvanceRequestByCampayRef(ctx context.Context, campayPayoutRef pgtype.Text) (db.AdvanceRequest, error)
 	UpdateAdvanceRequestStatus(ctx context.Context, arg db.UpdateAdvanceRequestStatusParams) (db.AdvanceRequest, error)
+	GetPhoneVerificationByCampayRef(ctx context.Context, campayPayoutRef pgtype.Text) (db.PhoneVerification, error)
+	UpdatePhoneVerificationStatus(ctx context.Context, arg db.UpdatePhoneVerificationStatusParams) (db.PhoneVerification, error)
+	SetPhoneVerified(ctx context.Context, id uuid.UUID) (db.User, error)
 	CreateEvent(ctx context.Context, arg db.CreateEventParams) (db.Event, error)
 }
 
@@ -307,13 +305,25 @@ func (h *webhookHandler) HandleCampayWebhook(c *gin.Context) {
 		return
 	}
 
-	existing, err := h.queries.GetAdvanceRequestByCampayRef(c.Request.Context(), pgtype.Text{String: wh.Reference, Valid: true})
-	if err != nil {
-		slog.Warn("webhook for unknown reference", "reference", wh.Reference)
-		JSONOK(c, http.StatusOK)
+	campayRef := pgtype.Text{String: wh.Reference, Valid: true}
+
+	advanceReq, advanceErr := h.queries.GetAdvanceRequestByCampayRef(c.Request.Context(), campayRef)
+	if advanceErr == nil {
+		h.handleAdvanceWebhook(c, advanceReq, wh)
 		return
 	}
 
+	phoneVerif, phoneErr := h.queries.GetPhoneVerificationByCampayRef(c.Request.Context(), campayRef)
+	if phoneErr == nil {
+		h.handlePhoneVerificationWebhook(c, phoneVerif, wh)
+		return
+	}
+
+	slog.Warn("webhook for unknown reference", "reference", wh.Reference)
+	JSONOK(c, http.StatusOK)
+}
+
+func (h *webhookHandler) handleAdvanceWebhook(c *gin.Context, existing db.AdvanceRequest, wh campay.WebhookPayload) {
 	var newStatus db.RequestStatus
 	var failureReason pgtype.Text
 	switch wh.Status {
@@ -335,7 +345,7 @@ func (h *webhookHandler) HandleCampayWebhook(c *gin.Context) {
 	now := time.Now()
 	elapsed := int32(now.Sub(existing.CreatedAt).Seconds())
 
-	_, err = h.queries.UpdateAdvanceRequestStatus(c.Request.Context(), db.UpdateAdvanceRequestStatusParams{
+	_, err := h.queries.UpdateAdvanceRequestStatus(c.Request.Context(), db.UpdateAdvanceRequestStatusParams{
 		ID:                    existing.ID,
 		Status:                newStatus,
 		FailureReason:         failureReason,
@@ -364,6 +374,56 @@ func (h *webhookHandler) HandleCampayWebhook(c *gin.Context) {
 		_, _ = h.queries.CreateEvent(c.Request.Context(), db.CreateEventParams{
 			UserID:    userID,
 			EventType: "payout_failed",
+			Metadata:  eventMeta,
+		})
+	}
+
+	JSONOK(c, http.StatusOK)
+}
+
+func (h *webhookHandler) handlePhoneVerificationWebhook(c *gin.Context, verif db.PhoneVerification, wh campay.WebhookPayload) {
+	var newStatus db.RequestStatus
+	var failureReason pgtype.Text
+	switch wh.Status {
+	case "SUCCESSFUL":
+		newStatus = db.RequestStatusSuccess
+	case "FAILED":
+		newStatus = db.RequestStatusFailed
+		if wh.Reason != "" && wh.Reason != "None" {
+			failureReason = pgtype.Text{String: wh.Reason, Valid: true}
+		}
+	case "PENDING":
+		newStatus = db.RequestStatusPending
+	default:
+		slog.Warn("unknown webhook status for phone verification", "status", wh.Status, "reference", wh.Reference)
+		JSONOK(c, http.StatusOK)
+		return
+	}
+
+	_, err := h.queries.UpdatePhoneVerificationStatus(c.Request.Context(), db.UpdatePhoneVerificationStatusParams{
+		ID:              verif.ID,
+		Status:          newStatus,
+		FailureReason:   failureReason,
+		CampayPayoutRef: pgtype.Text{String: wh.Reference, Valid: true},
+	})
+	if err != nil {
+		slog.Error("update phone verification status from webhook", "error", err, "reference", wh.Reference)
+		JSONError(c, http.StatusInternalServerError, "internal_error", "failed to update phone verification")
+		return
+	}
+
+	if newStatus == db.RequestStatusSuccess {
+		if _, err := h.queries.SetPhoneVerified(c.Request.Context(), verif.UserID); err != nil {
+			slog.Error("set phone verified from webhook", "error", err, "user_id", verif.UserID)
+		}
+
+		eventMeta, _ := json.Marshal(map[string]interface{}{
+			"verification_id": verif.ID.String(),
+			"phone_number":    verif.PhoneNumber,
+		})
+		_, _ = h.queries.CreateEvent(c.Request.Context(), db.CreateEventParams{
+			UserID:    pgtype.UUID{Bytes: verif.UserID, Valid: true},
+			EventType: "phone_verified",
 			Metadata:  eventMeta,
 		})
 	}

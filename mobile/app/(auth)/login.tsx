@@ -10,9 +10,9 @@ import {
   Platform,
   ScrollView,
 } from "react-native";
-import { api } from "@/src/lib/api";
 import { setTokens } from "@/src/lib/auth";
 import { useAuth } from "@/src/providers/auth-provider";
+import { useLogin } from "@/src/hooks/use-auth";
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -24,68 +24,48 @@ export default function LoginScreen() {
     }
   }, [user, router]);
 
-  const [countryCode, setCountryCode] = useState("+237");
-  const [loginPhone, setLoginPhone] = useState("");
-  const [loginStep, setLoginStep] = useState<"phone" | "otp">("phone");
-  const [loginOtp, setLoginOtp] = useState("");
-  const [loginError, setLoginError] = useState("");
-  const [sendingCode, setSendingCode] = useState(false);
-  const [verifyingCode, setVerifyingCode] = useState(false);
+  const [email, setEmail] = useState("");
+  const [pin, setPin] = useState("");
+  const [error, setError] = useState("");
 
-  const fullPhone = `${countryCode}${loginPhone}`;
-  const isValidPhone = (phone: string) => /^\+[1-9]\d{6,14}$/.test(phone);
+  const login = useLogin();
 
-  const handleSendCode = async () => {
-    setLoginError("");
-    if (!loginPhone.trim()) {
-      setLoginError("Phone number is required");
+  const isValidEmail = (e: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
+
+  const handleLogin = async () => {
+    setError("");
+    if (!email.trim()) {
+      setError("Email is required");
       return;
     }
-    if (!isValidPhone(fullPhone)) {
-      setLoginError("Enter a valid phone number with country code (e.g., +237 6XXXXXXXX)");
+    if (!isValidEmail(email.trim())) {
+      setError("Please enter a valid email address");
       return;
     }
-    setSendingCode(true);
+    if (pin.length !== 5) {
+      setError("PIN must be 5 digits");
+      return;
+    }
+
     try {
-      await api.post("/api/auth/send-phone-otp", { phone_number: fullPhone });
-      setLoginStep("otp");
-    } catch (err: unknown) {
-      if (err && typeof err === "object" && "response" in err && err.response && typeof err.response === "object" && "data" in err.response) {
-        const data = (err.response as { data?: { error?: string } }).data;
-        setLoginError(data?.error || "Failed to send verification code. Please try again.");
-      } else {
-        setLoginError("Network error. Please check your connection and try again.");
-      }
-    } finally {
-      setSendingCode(false);
-    }
-  };
-
-  const handleVerifyCode = async () => {
-    setLoginError("");
-    if (loginOtp.length !== 6) {
-      setLoginError("Please enter the full 6-digit code");
-      return;
-    }
-    setVerifyingCode(true);
-    try {
-      const { data } = await api.post("/api/auth/verify-phone-otp", {
-        phone_number: fullPhone,
-        code: loginOtp,
-      });
-      await setTokens(data.data.access_token, data.data.refresh_token);
+      const result = await login.mutateAsync({ email: email.trim(), pin });
+      await setTokens(result.access_token, result.refresh_token);
       await refreshUser();
       router.replace("/(app)/home");
     } catch (err: unknown) {
-      if (err && typeof err === "object" && "response" in err && err.response && typeof err.response === "object" && "data" in err.response) {
+      if (
+        err &&
+        typeof err === "object" &&
+        "response" in err &&
+        err.response &&
+        typeof err.response === "object" &&
+        "data" in err.response
+      ) {
         const data = (err.response as { data?: { error?: string } }).data;
-        setLoginError(data?.error || "Invalid code. Please try again.");
+        setError(data?.error || "Invalid email or PIN.");
       } else {
-        setLoginError("Network error. Please try again.");
+        setError("Network error. Please check your connection.");
       }
-      setLoginOtp("");
-    } finally {
-      setVerifyingCode(false);
     }
   };
 
@@ -107,104 +87,62 @@ export default function LoginScreen() {
             Log In
           </Text>
 
-          {loginStep === "phone" ? (
-            <>
-              <Text className="text-gray-700 mb-2 font-medium text-base">Phone Number</Text>
-              <View className="flex-row gap-3">
-                <TextInput
-                  className="border border-gray-300 rounded-lg px-3 py-4 text-lg w-20 text-center"
-                  value={countryCode}
-                  onChangeText={(text) => {
-                    setCountryCode(text.startsWith("+") ? text : `+${text}`);
-                    setLoginError("");
-                  }}
-                  keyboardType="phone-pad"
-                />
-                <TextInput
-                  className="flex-1 border border-gray-300 rounded-lg px-4 py-4 text-lg"
-                  placeholder="6XXXXXXXX"
-                  keyboardType="phone-pad"
-                  value={loginPhone}
-                  onChangeText={(text) => {
-                    setLoginPhone(text);
-                    setLoginError("");
-                  }}
-                />
-              </View>
-              {loginError ? (
-                <Text className="text-red-500 mt-2 text-base">{loginError}</Text>
-              ) : null}
-              <TouchableOpacity
-                className={`mt-6 rounded-xl py-4 items-center flex-row justify-center ${
-                  loginPhone.trim() ? "bg-primary-600" : "bg-primary-300"
-                }`}
-                onPress={handleSendCode}
-                disabled={!loginPhone.trim() || sendingCode}
-              >
-                {sendingCode ? (
-                  <ActivityIndicator color="white" />
-                ) : (
-                  <Text className="text-white font-bold text-lg">
-                    Continue
-                  </Text>
-                )}
-              </TouchableOpacity>
-            </>
-          ) : (
-            <>
-              <Text className="text-gray-700 mb-2 font-medium text-base">
-                Verification Code
-              </Text>
-              <Text className="text-gray-500 text-base mb-3">
-                We sent a 6-digit code to{"\n"}
-                <Text className="font-medium text-gray-700 text-lg">
-                  {fullPhone}
-                </Text>
-              </Text>
-              <TextInput
-                className="border border-gray-300 rounded-lg px-4 py-4 text-lg text-center tracking-widest"
-                placeholder="000000"
-                keyboardType="number-pad"
-                maxLength={6}
-                value={loginOtp}
-                onChangeText={(text) => {
-                  setLoginOtp(text.replace(/[^0-9]/g, ""));
-                  setLoginError("");
-                }}
-                autoFocus
-              />
-              {loginError ? (
-                <Text className="text-red-500 mt-2 text-base">{loginError}</Text>
-              ) : null}
-              <TouchableOpacity
-                className={`mt-6 rounded-xl py-4 items-center flex-row justify-center ${
-                  loginOtp.length === 6 ? "bg-primary-600" : "bg-primary-300"
-                }`}
-                onPress={handleVerifyCode}
-                disabled={loginOtp.length !== 6 || verifyingCode}
-              >
-                {verifyingCode ? (
-                  <ActivityIndicator color="white" />
-                ) : (
-                  <Text className="text-white font-semibold text-lg">
-                    Verify & Continue
-                  </Text>
-                )}
-              </TouchableOpacity>
-              <TouchableOpacity
-                className="mt-4 py-3 items-center"
-                onPress={() => {
-                  setLoginStep("phone");
-                  setLoginOtp("");
-                  setLoginError("");
-                }}
-              >
-                <Text className="text-primary-600 font-medium text-lg">
-                  Change phone number
-                </Text>
-              </TouchableOpacity>
-            </>
-          )}
+          <Text className="text-gray-700 mb-2 font-medium text-base">Email</Text>
+          <TextInput
+            className="border border-gray-300 rounded-lg px-4 py-4 text-lg"
+            placeholder="you@company.com"
+            keyboardType="email-address"
+            autoCapitalize="none"
+            autoComplete="email"
+            value={email}
+            onChangeText={(text) => {
+              setEmail(text);
+              setError("");
+            }}
+          />
+
+          <Text className="text-gray-700 mb-2 font-medium text-base mt-4">PIN</Text>
+          <TextInput
+            className="border border-gray-300 rounded-lg px-4 py-4 text-lg tracking-widest"
+            placeholder="•••••"
+            keyboardType="number-pad"
+            maxLength={5}
+            secureTextEntry
+            value={pin}
+            onChangeText={(text) => {
+              setPin(text.replace(/[^0-9]/g, ""));
+              setError("");
+            }}
+          />
+
+          {error ? (
+            <Text className="text-red-500 mt-2 text-base">{error}</Text>
+          ) : null}
+
+          <TouchableOpacity
+            className={`mt-6 rounded-xl py-4 items-center flex-row justify-center ${
+              email.trim() && pin.length === 5 && !login.isPending
+                ? "bg-primary-600"
+                : "bg-primary-300"
+            }`}
+            onPress={handleLogin}
+            disabled={!email.trim() || pin.length !== 5 || login.isPending}
+          >
+            {login.isPending ? (
+              <ActivityIndicator color="white" />
+            ) : (
+              <Text className="text-white font-bold text-lg">Log In</Text>
+            )}
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            className="mt-4 py-3 items-center"
+            onPress={() => router.push("/(auth)/forgot-pin")}
+          >
+            <Text className="text-primary-600 font-medium text-lg">
+              Forgot PIN?
+            </Text>
+          </TouchableOpacity>
         </View>
 
         <View className="flex-row items-center my-4">
@@ -219,7 +157,7 @@ export default function LoginScreen() {
             onPress={() => router.push("/(auth)/signup")}
           >
             <Text className="text-gray-900 font-bold text-lg">
-              Start Fresh
+              Sign Up
             </Text>
             <Text className="text-gray-500 text-base mt-1">
               Sign up with an invited email

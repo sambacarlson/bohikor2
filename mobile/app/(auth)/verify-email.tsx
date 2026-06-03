@@ -11,10 +11,17 @@ import {
   ScrollView,
 } from "react-native";
 import { useVerifyEmailOTP, useSendEmailOTP } from "@/src/hooks/use-auth";
+import { setTokens } from "@/src/lib/auth";
+import { api } from "@/src/lib/api";
+import { useAuth } from "@/src/providers/auth-provider";
 
 export default function VerifyEmailScreen() {
   const router = useRouter();
-  const { email } = useLocalSearchParams<{ email: string }>();
+  const { email, purpose } = useLocalSearchParams<{
+    email: string;
+    purpose?: string;
+  }>();
+  const { refreshUser } = useAuth();
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
   const [resendCooldown, setResendCooldown] = useState(0);
@@ -22,6 +29,8 @@ export default function VerifyEmailScreen() {
 
   const verifyEmailOTP = useVerifyEmailOTP();
   const sendEmailOTP = useSendEmailOTP();
+
+  const isPinReset = purpose === "pin_reset";
 
   useEffect(() => {
     if (resendCooldown > 0) {
@@ -39,9 +48,23 @@ export default function VerifyEmailScreen() {
     }
 
     try {
-      await verifyEmailOTP.mutateAsync({ email, code });
+      const result = await verifyEmailOTP.mutateAsync({
+        email,
+        code,
+        purpose: isPinReset ? "pin_reset" : "signup",
+      });
+
+      if (isPinReset && result) {
+        await setTokens(result.access_token, result.refresh_token);
+        await refreshUser();
+        router.replace({
+          pathname: "/(auth)/reset-pin",
+        });
+        return;
+      }
+
       router.push({
-        pathname: "/(auth)/verify-phone",
+        pathname: "/(auth)/create-pin",
         params: { email },
       });
     } catch {
@@ -55,7 +78,11 @@ export default function VerifyEmailScreen() {
     setError("");
 
     try {
-      await sendEmailOTP.mutateAsync(email);
+      if (isPinReset) {
+        await api.post("/api/auth/forgot-pin", { email });
+      } else {
+        await sendEmailOTP.mutateAsync(email);
+      }
       setResendCooldown(60);
     } catch {
       setError("Failed to resend code. Please try again.");
@@ -70,7 +97,7 @@ export default function VerifyEmailScreen() {
       <ScrollView contentContainerClassName="flex-1 justify-center px-6">
         <View className="items-center mb-8">
           <Text className="text-3xl font-bold text-gray-900">
-            Check your email
+            {isPinReset ? "Reset your PIN" : "Check your email"}
           </Text>
           <Text className="text-gray-500 mt-2 text-center text-lg">
             We sent a 6-digit code to{"\n"}
@@ -101,10 +128,9 @@ export default function VerifyEmailScreen() {
           ) : null}
 
           <TouchableOpacity
-            className={`mt-6 rounded-xl py-4 items-center flex-row justify-center ${verifyEmailOTP.isPending
-                ? "bg-primary-300"
-                : "bg-primary-600"
-              }`}
+            className={`mt-6 rounded-xl py-4 items-center flex-row justify-center ${
+              verifyEmailOTP.isPending ? "bg-primary-300" : "bg-primary-600"
+            }`}
             onPress={handleVerify}
             disabled={verifyEmailOTP.isPending || code.length !== 6}
           >

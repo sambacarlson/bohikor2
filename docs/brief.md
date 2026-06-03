@@ -8,13 +8,16 @@ Bohikor2 is a salary advance pilot app. Employees can request a one-time 10,000 
 
 Users who have completed authentication (Epic 1) can now request an advance and receive funds. Admins can monitor requests.
 
-## Auth (Epic 1 — Complete, Epic 2.5 — Own Auth)
+## Auth (Epic 1 — Complete, Epic 2.5 — Own Auth, Epic 3 — PIN Auth Overhaul)
 
 - **Admin:** Email/password login → backend bcrypt verification → JWT access token (15min) + refresh token (30 days with rotation) → dashboard with Invite + Users
-- **Mobile:** Phone number → backend sends OTP (Africa's Talking SMS or Discord webhook in dev) → verify OTP → JWT tokens → home
-- **Mobile (New user):** Enter invited email → `GET /api/auth/check-invite` → `POST /api/auth/send-email-otp` → verify email OTP → enter phone → Firebase-style phone OTP flow → home
+- **Mobile (New user):** Enter invited email → `GET /api/auth/check-invite` → `POST /api/auth/send-email-otp` → `POST /api/auth/verify-email-otp` (purpose=signup) → `POST /api/auth/create-pin` → home
+- **Mobile (Returning user):** Enter email + 5-digit PIN → `POST /api/auth/login` → home
+- **Mobile (Forgot PIN):** Enter email → `POST /api/auth/forgot-pin` → `POST /api/auth/verify-email-otp` (purpose=pin_reset) → `PUT /api/users/me/pin/reset` → home
+- **Phone verification:** User adds phone in settings → `POST /api/users/phone` → Campay mini-withdrawal (1 XAF) → webhook confirms → phone marked verified
+- **PIN rate limiting:** 3 failed attempts/hour, then 1hr cooldown, then 3 more attempts → account locked. Locked accounts unlocked by admin via `PUT /api/admin/users/:id/unlock`
 - **Tokens:** HS256 JWT access tokens (15min) + opaque refresh tokens (30 days) with rotation. Stored in expo-secure-store (mobile) or localStorage (admin).
-- **No Firebase dependency** — removed from all frontends and backend. Backend is sole auth authority.
+- **No Firebase, no SMS dependency.** Backend is sole auth authority. Phone verification uses Campay mini-withdrawal instead of SMS OTP.
 
 ## Request Flow (Epic 2 — Complete)
 
@@ -31,8 +34,7 @@ Users who have completed authentication (Epic 1) can now request an advance and 
 
 ### Eligibility (for now)
 
-- User must exist and be `active`
-- User must have `is_terms_accepted = true`
+- User must have verified phone AND accepted terms before requesting advance
 - No existing request with status `initiated` or `pending` (prevent duplicate in-flight requests)
 - ~~Request window 15th–end of month~~ — **deferred**
 - ~~Daily attempt limit~~ — **deferred**

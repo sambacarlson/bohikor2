@@ -19,6 +19,8 @@ export default function AppLayout() {
         <Stack.Screen name="home" />
         <Stack.Screen name="history" />
         <Stack.Screen name="terms" />
+        <Stack.Screen name="settings" />
+        <Stack.Screen name="settings/phone" />
       </Stack>
     </SafeAreaView>
   );

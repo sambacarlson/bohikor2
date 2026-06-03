@@ -26,9 +26,6 @@ import (
 	"github.com/Iknite-Space/bohikor2/internal/middleware"
 	"github.com/Iknite-Space/bohikor2/internal/repository"
 	"github.com/Iknite-Space/bohikor2/internal/service"
-	"github.com/Iknite-Space/bohikor2/internal/sms"
-	"github.com/Iknite-Space/bohikor2/internal/sms/africastalking"
-	"github.com/Iknite-Space/bohikor2/internal/sms/discord"
 )
 
 type Server struct {
@@ -62,18 +59,6 @@ func New(cfg *config.Config) (*Server, error) {
 
 	tokenService := authjwt.NewHS256Service(cfg.JWTSecret, cfg.JWTAccessExpiry)
 	hasher := authpassword.NewBcryptHasher()
-	var smsSender sms.Sender
-	switch cfg.SMSProvider {
-	case "africastalking":
-		smsSender = africastalking.NewClient(
-			cfg.AfricasTalkingAPIKey,
-			cfg.AfricasTalkingUsername,
-			cfg.AfricasTalkingSenderID,
-			cfg.AfricasTalkingBaseURL,
-		)
-	default:
-		smsSender = discord.NewClient(cfg.DiscordWebhookURL, cfg.DiscordBotUsername)
-	}
 
 	emailClient := email.NewClient(cfg.ResendAPIKey, cfg.FromEmail)
 
@@ -100,31 +85,29 @@ func New(cfg *config.Config) (*Server, error) {
 
 	authMiddleware := middleware.JWTAuth(tokenService)
 
-	// Public routes
 	router.GET("/health", healthHandler)
 
 	authHandler := handler.NewAuthHandler(
-		queries, tokenService, hasher, smsSender, 30*24*time.Hour,
+		queries, tokenService, hasher, emailClient, 30*24*time.Hour,
 	)
 	authGroup := router.Group("/api/auth")
 	{
 		authGroup.GET("/check-invite", authHandler.CheckInvitation)
 		authGroup.POST("/send-email-otp", authHandler.SendEmailOTP)
 		authGroup.POST("/verify-email-otp", authHandler.VerifyEmailOTP)
-		authGroup.POST("/send-phone-otp", authHandler.SendPhoneOTP)
-		authGroup.POST("/verify-phone-otp", authHandler.VerifyPhoneOTP)
+		authGroup.POST("/login", authHandler.Login)
+		authGroup.POST("/create-pin", authHandler.CreatePin)
+		authGroup.POST("/forgot-pin", authHandler.ForgotPin)
 		authGroup.POST("/admin/login", authHandler.AdminLogin)
 		authGroup.POST("/refresh", authHandler.RefreshToken)
 	}
 
-	// Auth-protected routes
 	authProtected := router.Group("/api/auth")
 	authProtected.Use(authMiddleware)
 	{
 		authProtected.POST("/logout", authHandler.Logout)
 	}
 
-	// Admin routes
 	adminGroup := router.Group("/api/admin")
 	adminGroup.Use(authMiddleware)
 	adminGroup.Use(middleware.RequireAdmin(queries))
@@ -133,19 +116,22 @@ func New(cfg *config.Config) (*Server, error) {
 		adminGroup.POST("/invite", handler.HandleInvite(inviteService))
 		adminGroup.GET("/invitations", handler.HandleListInvitations(queries))
 		adminGroup.GET("/users", handler.HandleListUsers(queries))
+		adminGroup.PUT("/users/:id/unlock", handler.HandleUnlockUser(queries))
 		adminGroup.GET("/events", handler.HandleListEvents(queries))
 	}
 
-	// User routes
 	userGroup := router.Group("/api/users")
 	userGroup.Use(authMiddleware)
 	userGroup.Use(middleware.RequireActiveUser(queries))
 	{
 		userGroup.GET("/me", handleUserMe(queries))
 		userGroup.PUT("/terms", handler.HandleAcceptTerms(queries))
+		userGroup.PUT("/me/pin", handler.NewPinHandler(queries, hasher).ChangePin)
+		userGroup.PUT("/me/pin/reset", handler.NewPinHandler(queries, hasher).ResetPin)
+		userGroup.POST("/phone", handler.NewPhoneHandler(queries, campayClient, cfg.CampayPhoneVerificationAmount).AddPhoneNumber)
+		userGroup.GET("/phone-verification", handler.NewPhoneHandler(queries, campayClient, cfg.CampayPhoneVerificationAmount).GetPhoneVerificationStatus)
 	}
 
-	// Advance request routes
 	advanceHandler := handler.NewAdvanceHandler(queries, campayClient, decimal.NewFromInt(10000))
 	advanceGroup := router.Group("/api/advance-requests")
 	advanceGroup.Use(authMiddleware)
@@ -155,7 +141,6 @@ func New(cfg *config.Config) (*Server, error) {
 		advanceGroup.GET("", advanceHandler.ListUserRequests)
 	}
 
-	// Admin advance request routes
 	adminAdvanceGroup := router.Group("/api/admin/requests")
 	adminAdvanceGroup.Use(authMiddleware)
 	adminAdvanceGroup.Use(middleware.RequireAdmin(queries))
@@ -163,7 +148,6 @@ func New(cfg *config.Config) (*Server, error) {
 		adminAdvanceGroup.GET("", handler.HandleListAdminRequests(queries))
 	}
 
-	// Webhook routes (public - JWT verified)
 	webhookHandler := handler.NewWebhookHandler(queries, campayClient)
 	router.POST("/api/webhooks/campay", webhookHandler.HandleCampayWebhook)
 

@@ -15,10 +15,8 @@ export function useCreateAdvanceRequest() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ phoneNumber }: { phoneNumber: string }) => {
-      const { data } = await api.post<{ data: AdvanceRequest }>("/api/advance-requests", {
-        phone_number: phoneNumber,
-      });
+    mutationFn: async () => {
+      const { data } = await api.post<{ data: AdvanceRequest }>("/api/advance-requests");
       return data.data;
     },
     onSuccess: () => {

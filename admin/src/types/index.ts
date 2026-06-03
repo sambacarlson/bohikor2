@@ -1,4 +1,4 @@
-export type UserStatus = "active" | "suspended";
+export type UserStatus = "active" | "suspended" | "locked";
 export type InvitationStatus = "pending" | "sent" | "accepted" | "revoked" | "failed";
 export type RequestStatus = "initiated" | "pending" | "success" | "failed";
 
@@ -7,13 +7,16 @@ export interface User {
   email: string;
   email_verified: boolean;
   full_name: string | null;
-  phone_number: string;
+  phone_number: string | null;
   phone_verified: boolean;
   status: UserStatus;
   is_terms_accepted: boolean;
   terms_accepted_at: string | null;
   terms_version: string | null;
   user_ip_at_consent: string | null;
+  pin_hash: string | null;
+  failed_login_attempts: number;
+  locked_until: string | null;
   created_at: string;
   updated_at: string;
 }

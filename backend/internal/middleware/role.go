@@ -15,6 +15,17 @@ type Querier interface {
 	GetUserByID(ctx context.Context, id uuid.UUID) (db.User, error)
 }
 
+func getLockedMessage(status db.UserStatus) string {
+	switch status {
+	case db.UserStatusSuspended:
+		return "account suspended"
+	case db.UserStatusLocked:
+		return "account locked"
+	default:
+		return "account restricted"
+	}
+}
+
 func RequireAdmin(q Querier) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		subjectIDStr := c.GetString("subject_id")
@@ -89,9 +100,9 @@ func RequireActiveUser(q Querier) gin.HandlerFunc {
 			return
 		}
 
-		if user.Status == db.UserStatusSuspended {
+		if user.Status == db.UserStatusSuspended || user.Status == db.UserStatusLocked {
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
-				"error": "account suspended",
+				"error": getLockedMessage(user.Status),
 			})
 			return
 		}
