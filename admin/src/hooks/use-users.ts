@@ -41,3 +41,17 @@ export function useActivateUser() {
     },
   });
 }
+
+export function useUnlockUser() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (userId: string) => {
+      const { data } = await api.put<User>(`/api/admin/users/${userId}/unlock`);
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["users"] });
+    },
+  });
+}

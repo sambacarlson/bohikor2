@@ -18,10 +18,15 @@ export default function HomeScreen() {
   const emailVerified = user?.email_verified ?? false;
   const phoneVerified = user?.phone_verified ?? false;
   const termsAccepted = user?.is_terms_accepted ?? false;
+  const profileIncomplete = !phoneVerified || !user?.phone_number;
 
   const handleRequestAdvance = () => {
     if (!termsAccepted) {
       router.push("/(app)/terms" as any);
+      return;
+    }
+    if (profileIncomplete) {
+      router.push("/(app)/settings/phone" as any);
       return;
     }
     setModalVisible(true);
@@ -29,7 +34,7 @@ export default function HomeScreen() {
 
   const handleConfirmRequest = async () => {
     try {
-      await createRequest.mutateAsync({ phoneNumber: phone });
+      await createRequest.mutateAsync();
       setModalVisible(false);
       router.push("/(app)/history" as any);
     } catch {
@@ -64,7 +69,7 @@ export default function HomeScreen() {
         </View>
 
         {!termsAccepted && (
-          <View className="px-6 mb-6">
+          <View className="px-6 mb-4">
             <View className="bg-yellow-50 border border-yellow-200 rounded-xl p-5">
               <Text className="text-base text-yellow-800 font-medium mb-1">
                 Terms not accepted
@@ -83,9 +88,34 @@ export default function HomeScreen() {
           </View>
         )}
 
+        {profileIncomplete && termsAccepted && (
+          <View className="px-6 mb-4">
+            <View className="bg-yellow-50 border border-yellow-200 rounded-xl p-5">
+              <Text className="text-base text-yellow-800 font-medium mb-1">
+                Complete your profile
+              </Text>
+              <Text className="text-sm text-yellow-700">
+                {!user?.phone_number
+                  ? "Add a phone number to receive advances via mobile money."
+                  : "Verify your phone number to request an advance."}
+              </Text>
+              <TouchableOpacity
+                className="mt-3 bg-yellow-600 rounded-lg py-2 px-4 self-start"
+                onPress={() => router.push("/(app)/settings/phone" as any)}
+              >
+                <Text className="text-white text-sm font-semibold">
+                  {!user?.phone_number ? "Add Phone Number" : "Verify Phone"}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
         <View className="px-6 mb-8">
           <TouchableOpacity
-            className="bg-primary-600 rounded-xl p-6 shadow-sm items-center"
+            className={`rounded-xl p-6 shadow-sm items-center ${
+              termsAccepted && !profileIncomplete ? "bg-primary-600" : "bg-primary-300"
+            }`}
             onPress={handleRequestAdvance}
             testID="request-advance-button"
           >
@@ -112,9 +142,9 @@ export default function HomeScreen() {
               <View className="flex-row justify-between items-center">
                 <Text className="text-base text-gray-500">Phone</Text>
                 <View className="flex-row items-center">
-                  <Text className="text-base text-gray-900">{phone}</Text>
+                  <Text className="text-base text-gray-900">{phone || "Not set"}</Text>
                   <Text className="text-base ml-2">
-                    {phoneVerified ? "✓" : "—"}
+                    {phone && phoneVerified ? "✓" : "—"}
                   </Text>
                 </View>
               </View>
@@ -142,6 +172,19 @@ export default function HomeScreen() {
           </View>
         </View>
 
+        <View className="px-6 mb-6">
+          <TouchableOpacity
+            className="bg-white rounded-xl p-5 shadow-sm flex-row items-center justify-between"
+            onPress={() => router.push("/(app)/settings" as any)}
+          >
+            <View className="flex-row items-center">
+              <Ionicons name="settings-outline" size={22} color="#4C4A6E" />
+              <Text className="text-gray-900 font-semibold text-lg ml-3">Settings</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={22} color="#9ca3af" />
+          </TouchableOpacity>
+        </View>
+
         <View className="px-6 mb-10">
           <TouchableOpacity
             className="bg-white rounded-xl p-5 shadow-sm flex-row items-center justify-between"
@@ -162,7 +205,17 @@ export default function HomeScreen() {
           activeOpacity={1}
           onPress={() => setMenuVisible(false)}
         >
-          <View className="absolute top-24 right-6 bg-white rounded-xl shadow-lg border border-primary-200 py-2 w-40">
+          <View className="absolute top-24 right-6 bg-white rounded-xl shadow-lg border border-primary-200 py-2 w-48">
+            <TouchableOpacity
+              className="px-4 py-3 flex-row items-center"
+              onPress={() => {
+                setMenuVisible(false);
+                router.push("/(app)/settings" as any);
+              }}
+            >
+              <Ionicons name="settings-outline" size={18} color="#4C4A6E" />
+              <Text className="text-gray-700 font-semibold ml-2">Settings</Text>
+            </TouchableOpacity>
             <TouchableOpacity
               className="px-4 py-3 flex-row items-center"
               onPress={() => {

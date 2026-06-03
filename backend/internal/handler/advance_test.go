@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -146,9 +147,14 @@ func TestCreateRequest_NotTermsAccepted(t *testing.T) {
 	userID := uuid.New()
 	q := &mockAdvanceQuerier{
 		user: &db.User{
-			ID:              userID,
-			IsTermsAccepted: false,
-			Status:          db.UserStatusActive,
+			ID:                  userID,
+			IsTermsAccepted:     false,
+			PhoneVerified:       true,
+			PhoneNumber:         pgtype.Text{String: "+237600000000", Valid: true},
+			Status:              db.UserStatusActive,
+			PinHash:             pgtype.Text{Valid: false},
+			FailedLoginAttempts: 0,
+			LockedUntil:         sql.NullTime{},
 		},
 	}
 	h := NewAdvanceHandler(q, &mockCampayTransferer{}, decimal.NewFromInt(10000))
@@ -161,7 +167,7 @@ func TestCreateRequest_NotTermsAccepted(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequestWithContext(context.Background(), "POST", "/api/advance-requests",
-		strings.NewReader(`{"phone_number":"237600000000"}`))
+		strings.NewReader(`{}`))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 
@@ -174,9 +180,14 @@ func TestCreateRequest_ActiveRequestExists(t *testing.T) {
 	userID := uuid.New()
 	q := &mockAdvanceQuerier{
 		user: &db.User{
-			ID:              userID,
-			IsTermsAccepted: true,
-			Status:          db.UserStatusActive,
+			ID:                  userID,
+			IsTermsAccepted:     true,
+			PhoneVerified:       true,
+			PhoneNumber:         pgtype.Text{String: "+237600000000", Valid: true},
+			Status:              db.UserStatusActive,
+			PinHash:             pgtype.Text{Valid: false},
+			FailedLoginAttempts: 0,
+			LockedUntil:         sql.NullTime{},
 		},
 		activeRequest: &db.AdvanceRequest{
 			ID:     uuid.New(),
@@ -194,7 +205,7 @@ func TestCreateRequest_ActiveRequestExists(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequestWithContext(context.Background(), "POST", "/api/advance-requests",
-		strings.NewReader(`{"phone_number":"237600000000"}`))
+		strings.NewReader(`{}`))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 
@@ -203,13 +214,18 @@ func TestCreateRequest_ActiveRequestExists(t *testing.T) {
 	}
 }
 
-func TestCreateRequest_MissingPhoneNumber(t *testing.T) {
+func TestCreateRequest_PhoneNotVerified(t *testing.T) {
 	userID := uuid.New()
 	q := &mockAdvanceQuerier{
 		user: &db.User{
-			ID:              userID,
-			IsTermsAccepted: true,
-			Status:          db.UserStatusActive,
+			ID:                  userID,
+			IsTermsAccepted:     true,
+			PhoneVerified:       false,
+			PhoneNumber:         pgtype.Text{Valid: false},
+			Status:              db.UserStatusActive,
+			PinHash:             pgtype.Text{Valid: false},
+			FailedLoginAttempts: 0,
+			LockedUntil:         sql.NullTime{},
 		},
 	}
 	h := NewAdvanceHandler(q, &mockCampayTransferer{}, decimal.NewFromInt(10000))
@@ -226,8 +242,8 @@ func TestCreateRequest_MissingPhoneNumber(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d", w.Code)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", w.Code)
 	}
 }
 
@@ -235,9 +251,14 @@ func TestCreateRequest_TransferSuccess(t *testing.T) {
 	userID := uuid.New()
 	q := &mockAdvanceQuerier{
 		user: &db.User{
-			ID:              userID,
-			IsTermsAccepted: true,
-			Status:          db.UserStatusActive,
+			ID:                  userID,
+			IsTermsAccepted:     true,
+			PhoneVerified:       true,
+			PhoneNumber:         pgtype.Text{String: "+237600000000", Valid: true},
+			Status:              db.UserStatusActive,
+			PinHash:             pgtype.Text{Valid: false},
+			FailedLoginAttempts: 0,
+			LockedUntil:         sql.NullTime{},
 		},
 	}
 	transferMock := &mockCampayTransferer{
@@ -256,7 +277,7 @@ func TestCreateRequest_TransferSuccess(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequestWithContext(context.Background(), "POST", "/api/advance-requests",
-		strings.NewReader(`{"phone_number":"237600000000"}`))
+		strings.NewReader(`{}`))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 
@@ -274,9 +295,14 @@ func TestCreateRequest_TransferPending(t *testing.T) {
 	userID := uuid.New()
 	q := &mockAdvanceQuerier{
 		user: &db.User{
-			ID:              userID,
-			IsTermsAccepted: true,
-			Status:          db.UserStatusActive,
+			ID:                  userID,
+			IsTermsAccepted:     true,
+			PhoneVerified:       true,
+			PhoneNumber:         pgtype.Text{String: "+237600000000", Valid: true},
+			Status:              db.UserStatusActive,
+			PinHash:             pgtype.Text{Valid: false},
+			FailedLoginAttempts: 0,
+			LockedUntil:         sql.NullTime{},
 		},
 	}
 	transferMock := &mockCampayTransferer{
@@ -295,7 +321,7 @@ func TestCreateRequest_TransferPending(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequestWithContext(context.Background(), "POST", "/api/advance-requests",
-		strings.NewReader(`{"phone_number":"237600000000"}`))
+		strings.NewReader(`{}`))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 
@@ -313,9 +339,14 @@ func TestCreateRequest_TransferFailed(t *testing.T) {
 	userID := uuid.New()
 	q := &mockAdvanceQuerier{
 		user: &db.User{
-			ID:              userID,
-			IsTermsAccepted: true,
-			Status:          db.UserStatusActive,
+			ID:                  userID,
+			IsTermsAccepted:     true,
+			PhoneVerified:       true,
+			PhoneNumber:         pgtype.Text{String: "+237600000000", Valid: true},
+			Status:              db.UserStatusActive,
+			PinHash:             pgtype.Text{Valid: false},
+			FailedLoginAttempts: 0,
+			LockedUntil:         sql.NullTime{},
 		},
 	}
 	transferMock := &mockCampayTransferer{
@@ -331,7 +362,7 @@ func TestCreateRequest_TransferFailed(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequestWithContext(context.Background(), "POST", "/api/advance-requests",
-		strings.NewReader(`{"phone_number":"237600000000"}`))
+		strings.NewReader(`{}`))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 
@@ -340,41 +371,18 @@ func TestCreateRequest_TransferFailed(t *testing.T) {
 	}
 }
 
-func TestCreateRequest_InvalidJSON(t *testing.T) {
-	userID := uuid.New()
-	q := &mockAdvanceQuerier{
-		user: &db.User{
-			ID:              userID,
-			IsTermsAccepted: true,
-			Status:          db.UserStatusActive,
-		},
-	}
-	h := NewAdvanceHandler(q, &mockCampayTransferer{}, decimal.NewFromInt(10000))
-
-	r := makeTestGin()
-	r.POST("/api/advance-requests", func(c *gin.Context) {
-		setUserContext(c, userID)
-		h.CreateRequest(c)
-	})
-
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequestWithContext(context.Background(), "POST", "/api/advance-requests",
-		strings.NewReader(`not json`))
-	req.Header.Set("Content-Type", "application/json")
-	r.ServeHTTP(w, req)
-
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d", w.Code)
-	}
-}
-
 func TestCreateRequest_RequireActiveUser_ShouldBeEnforcedByMiddleware(t *testing.T) {
 	userID := uuid.New()
 	q := &mockAdvanceQuerier{
 		user: &db.User{
-			ID:              userID,
-			IsTermsAccepted: true,
-			Status:          db.UserStatusSuspended,
+			ID:                  userID,
+			IsTermsAccepted:     true,
+			PhoneVerified:       true,
+			PhoneNumber:         pgtype.Text{String: "+237600000000", Valid: true},
+			Status:              db.UserStatusSuspended,
+			PinHash:             pgtype.Text{Valid: false},
+			FailedLoginAttempts: 0,
+			LockedUntil:         sql.NullTime{},
 		},
 	}
 	transferMock := &mockCampayTransferer{
@@ -393,7 +401,7 @@ func TestCreateRequest_RequireActiveUser_ShouldBeEnforcedByMiddleware(t *testing
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequestWithContext(context.Background(), "POST", "/api/advance-requests",
-		strings.NewReader(`{"phone_number":"237600000000"}`))
+		strings.NewReader(`{}`))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 
@@ -549,6 +557,18 @@ func (m *mockWebhookQuerier) UpdateAdvanceRequestStatus(ctx context.Context, arg
 
 func (m *mockWebhookQuerier) CreateEvent(ctx context.Context, arg db.CreateEventParams) (db.Event, error) {
 	return db.Event{ID: uuid.New()}, nil
+}
+
+func (m *mockWebhookQuerier) GetPhoneVerificationByCampayRef(ctx context.Context, campayPayoutRef pgtype.Text) (db.PhoneVerification, error) {
+	return db.PhoneVerification{}, errTestNotFound
+}
+
+func (m *mockWebhookQuerier) UpdatePhoneVerificationStatus(ctx context.Context, arg db.UpdatePhoneVerificationStatusParams) (db.PhoneVerification, error) {
+	return db.PhoneVerification{}, nil
+}
+
+func (m *mockWebhookQuerier) SetPhoneVerified(ctx context.Context, id uuid.UUID) (db.User, error) {
+	return db.User{}, nil
 }
 
 type mockWebhookVerifier struct {
@@ -773,9 +793,14 @@ func (m *mockAdminRequestsQuerier) ListAdvanceRequestsWithUser(ctx context.Conte
 func TestRequireActiveUser_Unauthenticated(t *testing.T) {
 	q := &mockAdvanceQuerier{
 		user: &db.User{
-			ID:              uuid.New(),
-			IsTermsAccepted: false,
-			Status:          db.UserStatusActive,
+			ID:                  uuid.New(),
+			IsTermsAccepted:     false,
+			PhoneVerified:       true,
+			PhoneNumber:         pgtype.Text{String: "+237600000000", Valid: true},
+			Status:              db.UserStatusActive,
+			PinHash:             pgtype.Text{Valid: false},
+			FailedLoginAttempts: 0,
+			LockedUntil:         sql.NullTime{},
 		},
 	}
 	h := NewAdvanceHandler(q, &mockCampayTransferer{}, decimal.NewFromInt(10000))
@@ -785,7 +810,7 @@ func TestRequireActiveUser_Unauthenticated(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequestWithContext(context.Background(), "POST", "/api/advance-requests",
-		strings.NewReader(`{"phone_number":"237600000000"}`))
+		strings.NewReader(`{}`))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 

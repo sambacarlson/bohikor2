@@ -15,7 +15,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 ### Enums
 
 ```sql
-CREATE TYPE user_status AS ENUM ('active', 'suspended');
+CREATE TYPE user_status AS ENUM ('active', 'suspended', 'locked');
 CREATE TYPE invitation_status AS ENUM ('pending', 'sent', 'accepted', 'revoked', 'failed');
 CREATE TYPE request_status AS ENUM ('initiated', 'pending', 'success', 'failed');
 ```
@@ -39,8 +39,11 @@ CREATE TABLE users (
     email TEXT UNIQUE NOT NULL,
     email_verified BOOLEAN NOT NULL DEFAULT FALSE,
     full_name TEXT,
-    phone_number TEXT NOT NULL,
+    phone_number TEXT,
     phone_verified BOOLEAN NOT NULL DEFAULT FALSE,
+    pin_hash TEXT,
+    failed_login_attempts INT NOT NULL DEFAULT 0,
+    locked_until TIMESTAMPTZ,
     status user_status NOT NULL DEFAULT 'active',
     is_terms_accepted BOOLEAN NOT NULL DEFAULT FALSE,
     terms_accepted_at TIMESTAMPTZ,
@@ -85,22 +88,26 @@ CREATE INDEX idx_email_otps_email ON email_otps (email);
 CREATE INDEX idx_email_otps_expires_at ON email_otps (expires_at);
 ```
 
-### Phone OTPs (temporary)
+### Phone Verifications
 
 ```sql
-CREATE TABLE phone_otps (
+CREATE TABLE phone_verifications (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
     phone_number TEXT NOT NULL,
-    code TEXT NOT NULL,
-    expires_at TIMESTAMPTZ NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    amount_xaf NUMERIC(10, 2) NOT NULL DEFAULT 100.00,
+    campay_payout_ref TEXT UNIQUE,
+    status request_status NOT NULL DEFAULT 'initiated',
+    failure_reason TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_phone_otps_phone_number ON phone_otps (phone_number);
-CREATE INDEX idx_phone_otps_expires_at ON phone_otps (expires_at);
+CREATE INDEX idx_phone_verifications_user_id ON phone_verifications (user_id);
+CREATE INDEX idx_phone_verifications_status ON phone_verifications (status);
 ```
 
-> OTP codes are stored as plaintext (short-lived, 15min expiry, deleted after verification). Not hashed.
+> Phone verification uses Campay mini-withdrawal instead of SMS OTP. Backend calls `POST /withdraw/` to the user's phone number; when Campay webhook confirms success, the phone is marked verified. Configurable via `CAMPAY_PHONE_VERIFICATION_AMOUNT` env var (default 100 XAF).
 
 ### Refresh Tokens
 
@@ -137,7 +144,7 @@ CREATE INDEX idx_events_event_type ON events (event_type);
 CREATE INDEX idx_events_created_at ON events (created_at);
 ```
 
-Auth event types: `user_invited`, `email_otp_sent`, `email_otp_verified`, `phone_otp_verified`, `signup_completed`, `user_suspended`, `user_activated`.
+Auth event types: `user_invited`, `email_otp_sent`, `email_otp_verified`, `pin_created`, `login_success`, `login_failed`, `pin_reset_requested`, `pin_reset_completed`, `phone_verification_initiated`, `phone_verified`, `user_locked`, `user_unlocked`, `user_suspended`, `user_activated`.
 
 ### Advance Requests
 
@@ -173,6 +180,6 @@ CREATE INDEX idx_advance_requests_user_id ON advance_requests (user_id);
 | Question | Resolution |
 | :--- | :--- |
 | **Invitation expiry** | No automatic expiry. Valid until accepted or revoked. |
-| **Phone verification** | Africa's Talking SMS OTP (Discord webhook in dev). Phone is primary identity. |
+| **Phone verification** | Campay mini-withdrawal (1 XAF). Phone is nullable — added in settings after signup. |
 | **Data retention** | Indefinite. |
 | **Terms acceptance** | Stored on `users` table. Must be accepted before requesting advance. Separate from auth flow. |

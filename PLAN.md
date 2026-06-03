@@ -87,7 +87,7 @@
 
 ## Epic 2.5: Firebase Removal — Own Auth (Complete)
 
-Removed Firebase from all frontends. Backend is now the sole auth authority using JWTs, bcrypt, and Africa's Talking SMS.
+Removed Firebase from all frontends. Backend is sole auth authority using JWTs, bcrypt, and SMS OTPs.
 
 - **Backend: authjwt package** — `internal/authjwt/service.go` (TokenService interface + HS256 impl), `token_util.go`, `service_test.go`
 - **Backend: authpassword package** — `internal/authpassword/hasher.go` (Hasher interface), `bcrypt.go`, `hasher_test.go`
@@ -114,16 +114,31 @@ Removed Firebase from all frontends. Backend is now the sole auth authority usin
 - **Admin: login/admin/page.tsx** — POST /api/auth/admin/login with email/password
 - **Admin: login/page.tsx** — POST /api/auth/send-phone-otp + verify-phone-otp flow
 - **Admin: auth-guard.tsx** — checks subjectType from auth context, no Firebase
-- **All tests passing** — backend (8 suites), admin (63 tests), mobile (26 tests); lint + typecheck clean
 
-## Epic 3: Pilot Launch (Future)
+## Epic 3: PIN Auth Overhaul (Current)
+
+Replaced SMS OTP login with email + 5-digit PIN authentication. Removed phone OTP entirely; phone verification now uses Campay mini-withdrawal. Added rate limiting, account locking, and PIN reset flow.
+
+### Key Changes
+
+- **Login flow:** Returning users enter email + 5-digit PIN → `POST /api/auth/login`. No more phone OTP for login.
+- **Signup flow:** New users verify email OTP (purpose=signup) → create PIN (`POST /api/auth/create-pin`). No phone step in signup.
+- **Forgot PIN:** `POST /api/auth/forgot-pin` → `POST /api/auth/verify-email-otp` (purpose=pin_reset) → `PUT /api/users/me/pin/reset`
+- **Phone verification:** Moved to settings. User adds phone → `POST /api/users/phone` → Campay mini-withdrawal (1 XAF) → webhook confirms → phone marked verified. No SMS dependency.
+- **Rate limiting:** 3 failed PIN attempts/hour, then 1hr cooldown, then 3 more → account locked (`status = 'locked'`). Admin unlocks via `PUT /api/admin/users/:id/unlock`.
+- **Schema changes:** `users.phone_number` nullable, added `pin_hash`, `failed_login_attempts`, `locked_until`. Added `'locked'` to `user_status` enum. Removed `phone_otps` table. Added `phone_verifications` table (reuses `request_status` enum).
+- **Backend changes:** New endpoints (`POST /api/auth/login`, `POST /api/auth/create-pin`, `POST /api/auth/forgot-pin`, `PUT /api/users/me/pin/reset`, `POST /api/users/phone`, `PUT /api/admin/users/:id/unlock`), PIN hashing with bcrypt, rate limiting middleware, account lock/unlock logic.
+- **Removed:** SMS package (africastalking, discord), `phone_otps` table, `POST /api/auth/send-phone-otp`, `POST /api/auth/verify-phone-otp`, Firebase Auth references.
+- **Prerequisite:** User must have verified phone AND accepted terms before requesting advance.
+
+## Epic 4: Pilot Launch (Future)
 
 - Kill switch toggle
 - Request window enforcement (15th–end of month)
 - Daily/monthly throttling
-- OTP rate limiting (per-phone, e.g. max 3/hour for send-phone-otp and send-email-otp)
+- OTP rate limiting (per-email, e.g. max 3/hour for send-email-otp)
 - Post-payout survey
 - Payout speed metrics
-- Push/SMS/email notifications
+- Push/email notifications
 - Events log page
 - E2E testing, production deployment

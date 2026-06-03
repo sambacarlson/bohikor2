@@ -6,12 +6,14 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 
 	db "github.com/Iknite-Space/bohikor2/db/sqlc"
 )
 
 type usersQuerier interface {
 	ListUsers(ctx context.Context, arg db.ListUsersParams) ([]db.User, error)
+	UnlockUser(ctx context.Context, id uuid.UUID) (db.User, error)
 }
 
 func HandleListUsers(q usersQuerier) gin.HandlerFunc {
@@ -42,5 +44,24 @@ func HandleListUsers(q usersQuerier) gin.HandlerFunc {
 		}
 
 		JSONSuccess(c, http.StatusOK, users)
+	}
+}
+
+func HandleUnlockUser(q usersQuerier) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userIDStr := c.Param("id")
+		userID, err := uuid.Parse(userIDStr)
+		if err != nil {
+			JSONError(c, http.StatusBadRequest, "invalid_id", "invalid user ID")
+			return
+		}
+
+		user, err := q.UnlockUser(c.Request.Context(), userID)
+		if err != nil {
+			JSONError(c, http.StatusNotFound, "not_found", "user not found")
+			return
+		}
+
+		JSONSuccess(c, http.StatusOK, user)
 	}
 }

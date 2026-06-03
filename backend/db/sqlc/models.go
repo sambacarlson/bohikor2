@@ -109,6 +109,7 @@ type UserStatus string
 const (
 	UserStatusActive    UserStatus = "active"
 	UserStatusSuspended UserStatus = "suspended"
+	UserStatusLocked    UserStatus = "locked"
 )
 
 func (e *UserStatus) Scan(src interface{}) error {
@@ -192,12 +193,16 @@ type Invitation struct {
 	UpdatedAt  time.Time        `json:"updated_at"`
 }
 
-type PhoneOtp struct {
-	ID          uuid.UUID `json:"id"`
-	PhoneNumber string    `json:"phone_number"`
-	Code        string    `json:"code"`
-	ExpiresAt   time.Time `json:"expires_at"`
-	CreatedAt   time.Time `json:"created_at"`
+type PhoneVerification struct {
+	ID              uuid.UUID      `json:"id"`
+	UserID          uuid.UUID      `json:"user_id"`
+	PhoneNumber     string         `json:"phone_number"`
+	AmountXaf       pgtype.Numeric `json:"amount_xaf"`
+	CampayPayoutRef pgtype.Text    `json:"campay_payout_ref"`
+	Status          RequestStatus  `json:"status"`
+	FailureReason   pgtype.Text    `json:"failure_reason"`
+	CreatedAt       time.Time      `json:"created_at"`
+	UpdatedAt       time.Time      `json:"updated_at"`
 }
 
 type RefreshToken struct {
@@ -210,17 +215,20 @@ type RefreshToken struct {
 }
 
 type User struct {
-	ID              uuid.UUID    `json:"id"`
-	Email           string       `json:"email"`
-	EmailVerified   bool         `json:"email_verified"`
-	FullName        pgtype.Text  `json:"full_name"`
-	PhoneNumber     string       `json:"phone_number"`
-	PhoneVerified   bool         `json:"phone_verified"`
-	Status          UserStatus   `json:"status"`
-	IsTermsAccepted bool         `json:"is_terms_accepted"`
-	TermsAcceptedAt sql.NullTime `json:"terms_accepted_at"`
-	TermsVersion    pgtype.Text  `json:"terms_version"`
-	UserIpAtConsent *netip.Addr  `json:"user_ip_at_consent"`
-	CreatedAt       time.Time    `json:"created_at"`
-	UpdatedAt       time.Time    `json:"updated_at"`
+	ID                  uuid.UUID    `json:"id"`
+	Email               string       `json:"email"`
+	EmailVerified       bool         `json:"email_verified"`
+	FullName            pgtype.Text  `json:"full_name"`
+	PhoneNumber         pgtype.Text  `json:"phone_number"`
+	PhoneVerified       bool         `json:"phone_verified"`
+	Status              UserStatus   `json:"status"`
+	IsTermsAccepted     bool         `json:"is_terms_accepted"`
+	TermsAcceptedAt     sql.NullTime `json:"terms_accepted_at"`
+	TermsVersion        pgtype.Text  `json:"terms_version"`
+	UserIpAtConsent     *netip.Addr  `json:"user_ip_at_consent"`
+	CreatedAt           time.Time    `json:"created_at"`
+	UpdatedAt           time.Time    `json:"updated_at"`
+	PinHash             pgtype.Text  `json:"pin_hash"`
+	FailedLoginAttempts int32        `json:"failed_login_attempts"`
+	LockedUntil         sql.NullTime `json:"locked_until"`
 }

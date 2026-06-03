@@ -10,19 +10,16 @@ import {
   Platform,
   ScrollView,
 } from "react-native";
-import { useCheckInvitation, useSendEmailOTP } from "@/src/hooks/use-auth";
+import { useForgotPin } from "@/src/hooks/use-auth";
 
-export default function SignupScreen() {
+export default function ForgotPinScreen() {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [error, setError] = useState("");
 
-  const checkInvitation = useCheckInvitation();
-  const sendEmailOTP = useSendEmailOTP();
+  const forgotPin = useForgotPin();
 
-  const isValidEmail = (email: string) => {
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-  };
+  const isValidEmail = (e: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
 
   const handleContinue = async () => {
     setError("");
@@ -36,23 +33,10 @@ export default function SignupScreen() {
     }
 
     try {
-      const result = await checkInvitation.mutateAsync(email.trim());
-      if (!result.has_invitation) {
-        setError(
-          "No invitation found for this email. Contact your manager."
-        );
-        return;
-      }
-      if (result.status === "accepted") {
-        router.push({
-          pathname: "/(auth)/login",
-        });
-        return;
-      }
-      await sendEmailOTP.mutateAsync(email.trim());
+      await forgotPin.mutateAsync(email.trim());
       router.push({
         pathname: "/(auth)/verify-email",
-        params: { email: email.trim() },
+        params: { email: email.trim(), purpose: "pin_reset" },
       });
     } catch (err: unknown) {
       if (
@@ -64,9 +48,9 @@ export default function SignupScreen() {
         "data" in err.response
       ) {
         const data = (err.response as { data?: { error?: string } }).data;
-        setError(data?.error || "Failed to check invitation. Please try again.");
+        setError(data?.error || "Failed to send reset code.");
       } else {
-        setError("Network error. Please check your connection and try again.");
+        setError("Network error. Please check your connection.");
       }
     }
   };
@@ -78,11 +62,14 @@ export default function SignupScreen() {
     >
       <ScrollView contentContainerClassName="flex-1 justify-center px-6">
         <View className="items-center mb-8">
-          <Text className="text-3xl font-bold text-gray-900">Bohikor2</Text>
+          <Text className="text-3xl font-bold text-gray-900">
+            Forgot PIN?
+          </Text>
           <Text className="text-gray-500 mt-2 text-center text-lg">
-            Enter your invited email to get started
+            Enter your email and we&apos;ll send you a verification code to reset your PIN
           </Text>
         </View>
+
         <View className="w-full">
           <Text className="text-gray-700 mb-2 font-medium text-base">Email</Text>
           <TextInput
@@ -97,32 +84,33 @@ export default function SignupScreen() {
               setError("");
             }}
           />
+
           {error ? (
             <Text className="text-red-500 mt-2 text-base">{error}</Text>
           ) : null}
+
           <TouchableOpacity
             className={`mt-6 rounded-xl py-4 items-center ${
-              checkInvitation.isPending || sendEmailOTP.isPending
-                ? "bg-primary-300"
-                : "bg-primary-600"
+              email.trim() && !forgotPin.isPending
+                ? "bg-primary-600"
+                : "bg-primary-300"
             }`}
             onPress={handleContinue}
-            disabled={checkInvitation.isPending || sendEmailOTP.isPending}
+            disabled={!email.trim() || forgotPin.isPending}
           >
-            {checkInvitation.isPending || sendEmailOTP.isPending ? (
+            {forgotPin.isPending ? (
               <ActivityIndicator color="white" />
             ) : (
-              <Text className="text-white font-bold text-lg">
-                Continue
-              </Text>
+              <Text className="text-white font-bold text-lg">Send Reset Code</Text>
             )}
           </TouchableOpacity>
+
           <TouchableOpacity
             className="mt-4 py-3 items-center"
             onPress={() => router.back()}
           >
             <Text className="text-primary-600 font-medium text-lg">
-              Already have an account? Log in
+              Back to Login
             </Text>
           </TouchableOpacity>
         </View>

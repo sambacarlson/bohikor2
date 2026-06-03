@@ -3,8 +3,10 @@ package handler
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"math/big"
 	"net/http"
 	"time"
@@ -16,27 +18,25 @@ import (
 	db "github.com/Iknite-Space/bohikor2/db/sqlc"
 	"github.com/Iknite-Space/bohikor2/internal/authjwt"
 	"github.com/Iknite-Space/bohikor2/internal/authpassword"
-	"github.com/Iknite-Space/bohikor2/internal/sms"
 )
+
+type emailSender interface {
+	SendOTP(ctx context.Context, to, code string) error
+}
 
 type AuthHandler struct {
 	queries       authQuerier
 	tokenService  authjwt.TokenService
 	hasher        authpassword.Hasher
-	smsSender     sms.Sender
+	emailClient   emailSender
 	refreshExpiry time.Duration
 }
 
 type authQuerier interface {
 	GetUserByID(ctx context.Context, id uuid.UUID) (db.User, error)
 	GetUserByEmail(ctx context.Context, email string) (db.User, error)
-	GetUserByPhoneNumber(ctx context.Context, phoneNumber string) (db.User, error)
-	CreateUser(ctx context.Context, arg db.CreateUserParams) (db.User, error)
-	GetAdminByID(ctx context.Context, id uuid.UUID) (db.Admin, error)
 	GetAdminByEmail(ctx context.Context, email string) (db.Admin, error)
-	CreatePhoneOTP(ctx context.Context, arg db.CreatePhoneOTPParams) (db.PhoneOtp, error)
-	GetPhoneOTPByPhoneNumber(ctx context.Context, phoneNumber string) (db.PhoneOtp, error)
-	DeletePhoneOTP(ctx context.Context, phoneNumber string) error
+	CreateUser(ctx context.Context, arg db.CreateUserParams) (db.User, error)
 	CreateRefreshToken(ctx context.Context, arg db.CreateRefreshTokenParams) (db.RefreshToken, error)
 	GetRefreshTokenByHash(ctx context.Context, tokenHash string) (db.RefreshToken, error)
 	RevokeRefreshToken(ctx context.Context, tokenHash string) error
@@ -46,6 +46,11 @@ type authQuerier interface {
 	GetEmailOTPByEmail(ctx context.Context, email string) (db.EmailOtp, error)
 	DeleteEmailOTP(ctx context.Context, email string) error
 	AcceptInvitation(ctx context.Context, email string) (db.Invitation, error)
+	IncrementFailedLoginAttempts(ctx context.Context, id uuid.UUID) (db.User, error)
+	ResetLoginAttempts(ctx context.Context, id uuid.UUID) (db.User, error)
+	LockUserUntil(ctx context.Context, arg db.LockUserUntilParams) (db.User, error)
+	LockUser(ctx context.Context, id uuid.UUID) (db.User, error)
+	UpdateUserPinHash(ctx context.Context, arg db.UpdateUserPinHashParams) (db.User, error)
 	CreateEvent(ctx context.Context, arg db.CreateEventParams) (db.Event, error)
 }
 
@@ -53,14 +58,14 @@ func NewAuthHandler(
 	queries authQuerier,
 	tokenService authjwt.TokenService,
 	hasher authpassword.Hasher,
-	smsSender sms.Sender,
+	emailClient emailSender,
 	refreshExpiry time.Duration,
 ) *AuthHandler {
 	return &AuthHandler{
 		queries:       queries,
 		tokenService:  tokenService,
 		hasher:        hasher,
-		smsSender:     smsSender,
+		emailClient:   emailClient,
 		refreshExpiry: refreshExpiry,
 	}
 }
@@ -104,12 +109,184 @@ func (h *AuthHandler) generateTokenPair(subjectID string, subjectType string) (*
 	}, nil
 }
 
-func (h *AuthHandler) SendPhoneOTP(c *gin.Context) {
+func (h *AuthHandler) Login(c *gin.Context) {
 	var req struct {
-		PhoneNumber string `json:"phone_number" binding:"required"`
+		Email string `json:"email" binding:"required,email"`
+		PIN   string `json:"pin" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		JSONError(c, http.StatusBadRequest, "invalid_request", "phone_number is required")
+		JSONError(c, http.StatusBadRequest, "invalid_request", "email and pin are required")
+		return
+	}
+
+	if len(req.PIN) != 5 {
+		JSONError(c, http.StatusBadRequest, "invalid_pin", "PIN must be 5 digits")
+		return
+	}
+
+	user, err := h.queries.GetUserByEmail(c.Request.Context(), req.Email)
+	if err != nil {
+		JSONError(c, http.StatusUnauthorized, "invalid_credentials", "Invalid email or PIN")
+		return
+	}
+
+	if user.Status == db.UserStatusLocked {
+		JSONError(c, http.StatusForbidden, "account_locked", "Your account has been locked. Please contact your manager to unlock it.")
+		return
+	}
+
+	if user.Status == db.UserStatusSuspended {
+		JSONError(c, http.StatusForbidden, "account_suspended", "Your account has been suspended.")
+		return
+	}
+
+	if user.LockedUntil.Valid && user.LockedUntil.Time.After(time.Now().UTC()) {
+		remaining := time.Until(user.LockedUntil.Time).Round(time.Minute)
+		JSONError(c, http.StatusTooManyRequests, "too_many_attempts",
+			fmt.Sprintf("Too many failed attempts. Try again in %s.", remaining))
+		return
+	}
+
+	if !user.PinHash.Valid || user.PinHash.String == "" {
+		JSONError(c, http.StatusUnauthorized, "invalid_credentials", "Invalid email or PIN")
+		return
+	}
+
+	if !h.hasher.Verify(user.PinHash.String, req.PIN) {
+		user, _ = h.queries.IncrementFailedLoginAttempts(c.Request.Context(), user.ID)
+
+		if user.FailedLoginAttempts >= 6 {
+			if _, err := h.queries.LockUser(c.Request.Context(), user.ID); err != nil {
+				slog.Error("lock user account", "error", err, "user_id", user.ID)
+			}
+			JSONError(c, http.StatusForbidden, "account_locked", "Your account has been locked due to too many failed attempts. Please contact your manager.")
+			return
+		}
+
+		if user.FailedLoginAttempts >= 3 {
+			lockUntil := time.Now().UTC().Add(1 * time.Hour)
+			if _, err := h.queries.LockUserUntil(c.Request.Context(), db.LockUserUntilParams{
+				ID:          user.ID,
+				LockedUntil: sql.NullTime{Time: lockUntil, Valid: true},
+			}); err != nil {
+				slog.Error("lock user until", "error", err, "user_id", user.ID)
+			}
+			JSONError(c, http.StatusTooManyRequests, "too_many_attempts",
+				"Too many failed attempts. Try again in 1 hour.")
+			return
+		}
+
+		JSONError(c, http.StatusUnauthorized, "invalid_credentials", "Invalid email or PIN")
+		return
+	}
+
+	if _, err := h.queries.ResetLoginAttempts(c.Request.Context(), user.ID); err != nil {
+		slog.Error("reset login attempts", "error", err, "user_id", user.ID)
+	}
+
+	tokens, err := h.generateTokenPair(user.ID.String(), "user")
+	if err != nil {
+		JSONError(c, http.StatusInternalServerError, "token_failed", "Failed to generate tokens")
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"data": gin.H{
+			"user":          sanitizeUser(user),
+			"access_token":  tokens.AccessToken,
+			"refresh_token": tokens.RefreshToken,
+			"expires_in":    tokens.ExpiresIn,
+		},
+	})
+}
+
+func (h *AuthHandler) CreatePin(c *gin.Context) {
+	var req struct {
+		Email string `json:"email" binding:"required,email"`
+		PIN   string `json:"pin" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		JSONError(c, http.StatusBadRequest, "invalid_request", "email and pin are required")
+		return
+	}
+
+	if len(req.PIN) != 5 {
+		JSONError(c, http.StatusBadRequest, "invalid_pin", "PIN must be 5 digits")
+		return
+	}
+
+	_, err := h.queries.GetUserByEmail(c.Request.Context(), req.Email)
+	if err == nil {
+		JSONError(c, http.StatusConflict, "user_exists", "User already exists. Please log in instead.")
+		return
+	}
+
+	pinHash, err := h.hasher.Hash(req.PIN)
+	if err != nil {
+		JSONError(c, http.StatusInternalServerError, "hash_failed", "Failed to hash PIN")
+		return
+	}
+
+	user, err := h.queries.CreateUser(c.Request.Context(), db.CreateUserParams{
+		Email:         req.Email,
+		EmailVerified: true,
+		FullName:      pgtype.Text{Valid: false},
+		PhoneNumber:   pgtype.Text{Valid: false},
+		PhoneVerified: false,
+		Status:        db.UserStatusActive,
+		PinHash:       pgtype.Text{String: pinHash, Valid: true},
+	})
+	if err != nil {
+		JSONError(c, http.StatusInternalServerError, "create_user_failed", "Failed to create user")
+		return
+	}
+
+	if _, err := h.queries.AcceptInvitation(c.Request.Context(), req.Email); err != nil {
+		fmt.Printf("WARN: failed to accept invitation for %s: %v\n", req.Email, err)
+	}
+
+	metadata, _ := json.Marshal(map[string]string{"source": "mobile"})
+	if _, err := h.queries.CreateEvent(c.Request.Context(), db.CreateEventParams{
+		UserID:    pgtype.UUID{Bytes: user.ID, Valid: true},
+		EventType: "signup_completed",
+		Metadata:  metadata,
+	}); err != nil {
+		slog.Error("create signup event", "error", err)
+	}
+
+	tokens, err := h.generateTokenPair(user.ID.String(), "user")
+	if err != nil {
+		JSONError(c, http.StatusInternalServerError, "token_failed", "Failed to generate tokens")
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{
+		"data": gin.H{
+			"user":          sanitizeUser(user),
+			"access_token":  tokens.AccessToken,
+			"refresh_token": tokens.RefreshToken,
+			"expires_in":    tokens.ExpiresIn,
+		},
+	})
+}
+
+func (h *AuthHandler) ForgotPin(c *gin.Context) {
+	var req struct {
+		Email string `json:"email" binding:"required,email"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		JSONError(c, http.StatusBadRequest, "invalid_request", "email is required")
+		return
+	}
+
+	user, err := h.queries.GetUserByEmail(c.Request.Context(), req.Email)
+	if err != nil {
+		JSONError(c, http.StatusNotFound, "not_found", "No account found with this email")
+		return
+	}
+
+	if user.Status == db.UserStatusLocked {
+		JSONError(c, http.StatusForbidden, "account_locked", "Your account is locked. Please contact your manager to unlock it.")
 		return
 	}
 
@@ -119,37 +296,86 @@ func (h *AuthHandler) SendPhoneOTP(c *gin.Context) {
 		return
 	}
 
-	expiresAt := time.Now().UTC().Add(15 * time.Minute)
-	_, err = h.queries.CreatePhoneOTP(c.Request.Context(), db.CreatePhoneOTPParams{
-		PhoneNumber: req.PhoneNumber,
-		Code:        code,
-		ExpiresAt:   expiresAt,
+	expiresAt := time.Now().UTC().Add(10 * time.Minute)
+	_, err = h.queries.CreateEmailOTP(c.Request.Context(), db.CreateEmailOTPParams{
+		Email:     req.Email,
+		Code:      code,
+		ExpiresAt: expiresAt,
 	})
 	if err != nil {
 		JSONError(c, http.StatusInternalServerError, "store_otp_failed", "Failed to store OTP")
 		return
 	}
 
-	if err := h.smsSender.SendOTP(c.Request.Context(), req.PhoneNumber, code); err != nil {
-		JSONError(c, http.StatusInternalServerError, "send_otp_failed", "Failed to send OTP via SMS")
+	if err := h.emailClient.SendOTP(c.Request.Context(), req.Email, code); err != nil {
+		JSONError(c, http.StatusInternalServerError, "send_otp_failed", "Failed to send OTP email")
 		return
 	}
 
 	JSONOK(c, http.StatusOK)
 }
 
-func (h *AuthHandler) VerifyPhoneOTP(c *gin.Context) {
+func (h *AuthHandler) SendEmailOTP(c *gin.Context) {
 	var req struct {
-		PhoneNumber string `json:"phone_number" binding:"required"`
-		Code        string `json:"code" binding:"required"`
-		Email       string `json:"email"`
+		Email string `json:"email" binding:"required,email"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		JSONError(c, http.StatusBadRequest, "invalid_request", "phone_number and code are required")
+		JSONError(c, http.StatusBadRequest, "invalid_request", "email is required")
 		return
 	}
 
-	storedOTP, err := h.queries.GetPhoneOTPByPhoneNumber(c.Request.Context(), req.PhoneNumber)
+	invitation, err := h.queries.GetActiveInvitationByEmail(c.Request.Context(), req.Email)
+	if err != nil {
+		JSONError(c, http.StatusNotFound, "no_invitation", "No invitation found for this email. Contact your manager.")
+		return
+	}
+	if invitation.Status != db.InvitationStatusPending && invitation.Status != db.InvitationStatusSent {
+		JSONError(c, http.StatusForbidden, "invitation_not_active", "Invitation is no longer active")
+		return
+	}
+
+	code, err := generateOTP()
+	if err != nil {
+		JSONError(c, http.StatusInternalServerError, "otp_generation_failed", "Failed to generate OTP")
+		return
+	}
+
+	expiresAt := time.Now().UTC().Add(10 * time.Minute)
+	_, err = h.queries.CreateEmailOTP(c.Request.Context(), db.CreateEmailOTPParams{
+		Email:     req.Email,
+		Code:      code,
+		ExpiresAt: expiresAt,
+	})
+	if err != nil {
+		JSONError(c, http.StatusInternalServerError, "store_otp_failed", "Failed to store OTP")
+		return
+	}
+
+	if err := h.emailClient.SendOTP(c.Request.Context(), req.Email, code); err != nil {
+		JSONError(c, http.StatusInternalServerError, "send_otp_failed", "Failed to send OTP email")
+		return
+	}
+
+	JSONOK(c, http.StatusOK)
+}
+
+func (h *AuthHandler) VerifyEmailOTP(c *gin.Context) {
+	var req struct {
+		Email   string `json:"email" binding:"required,email"`
+		Code    string `json:"code" binding:"required"`
+		Purpose string `json:"purpose"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		JSONError(c, http.StatusBadRequest, "invalid_request", "email and code are required")
+		return
+	}
+
+	if req.Purpose != "" && req.Purpose != "signup" && req.Purpose != "pin_reset" {
+		JSONError(c, http.StatusBadRequest, "invalid_purpose", "purpose must be 'signup' or 'pin_reset'")
+		return
+	}
+
+	storedOTP, err := h.queries.GetEmailOTPByEmail(c.Request.Context(), req.Email)
 	if err != nil {
 		JSONError(c, http.StatusBadRequest, "invalid_otp", "Invalid or expired OTP")
 		return
@@ -160,18 +386,32 @@ func (h *AuthHandler) VerifyPhoneOTP(c *gin.Context) {
 		return
 	}
 
-	_ = h.queries.DeletePhoneOTP(c.Request.Context(), req.PhoneNumber)
+	if err := h.queries.DeleteEmailOTP(c.Request.Context(), req.Email); err != nil {
+		JSONError(c, http.StatusInternalServerError, "cleanup_failed", "Failed to cleanup OTP")
+		return
+	}
 
-	existingUser, err := h.queries.GetUserByPhoneNumber(c.Request.Context(), req.PhoneNumber)
-	if err == nil {
-		tokens, err := h.generateTokenPair(existingUser.ID.String(), "user")
+	if req.Purpose == "pin_reset" {
+		user, err := h.queries.GetUserByEmail(c.Request.Context(), req.Email)
+		if err != nil {
+			JSONError(c, http.StatusNotFound, "not_found", "No account found with this email")
+			return
+		}
+
+		if user.Status == db.UserStatusLocked {
+			JSONError(c, http.StatusForbidden, "account_locked", "Your account is locked. Contact your manager.")
+			return
+		}
+
+		tokens, err := h.generateTokenPair(user.ID.String(), "user")
 		if err != nil {
 			JSONError(c, http.StatusInternalServerError, "token_failed", "Failed to generate tokens")
 			return
 		}
+
 		c.JSON(http.StatusOK, gin.H{
 			"data": gin.H{
-				"user":          existingUser,
+				"user":          sanitizeUser(user),
 				"access_token":  tokens.AccessToken,
 				"refresh_token": tokens.RefreshToken,
 				"expires_in":    tokens.ExpiresIn,
@@ -180,59 +420,12 @@ func (h *AuthHandler) VerifyPhoneOTP(c *gin.Context) {
 		return
 	}
 
-	if req.Email == "" {
-		JSONError(c, http.StatusBadRequest, "email_required", "New users must provide an email address")
+	if _, err := h.queries.AcceptInvitation(c.Request.Context(), req.Email); err != nil {
+		JSONError(c, http.StatusInternalServerError, "accept_invitation_failed", "Failed to accept invitation")
 		return
 	}
 
-	_, err = h.queries.GetUserByEmail(c.Request.Context(), req.Email)
-	if err == nil {
-		JSONError(c, http.StatusConflict, "user_exists", "User already exists with this email. Please log in instead.")
-		return
-	}
-
-	_, err = h.queries.GetActiveInvitationByEmail(c.Request.Context(), req.Email)
-	if err != nil {
-		JSONError(c, http.StatusForbidden, "no_invitation", "No active invitation found for this email")
-		return
-	}
-
-	user, err := h.queries.CreateUser(c.Request.Context(), db.CreateUserParams{
-		Email:         req.Email,
-		EmailVerified: true,
-		FullName:      pgtype.Text{Valid: false},
-		PhoneNumber:   req.PhoneNumber,
-		PhoneVerified: true,
-		Status:        db.UserStatusActive,
-	})
-	if err != nil {
-		JSONError(c, http.StatusInternalServerError, "create_user_failed", "Failed to create user")
-		return
-	}
-
-	_, _ = h.queries.AcceptInvitation(c.Request.Context(), req.Email)
-
-	metadata, _ := json.Marshal(map[string]string{"source": "mobile"})
-	_, _ = h.queries.CreateEvent(c.Request.Context(), db.CreateEventParams{
-		UserID:    pgtype.UUID{Bytes: user.ID, Valid: true},
-		EventType: "signup_completed",
-		Metadata:  metadata,
-	})
-
-	tokens, err := h.generateTokenPair(user.ID.String(), "user")
-	if err != nil {
-		JSONError(c, http.StatusInternalServerError, "token_failed", "Failed to generate tokens")
-		return
-	}
-
-	c.JSON(http.StatusCreated, gin.H{
-		"data": gin.H{
-			"user":          user,
-			"access_token":  tokens.AccessToken,
-			"refresh_token": tokens.RefreshToken,
-			"expires_in":    tokens.ExpiresIn,
-		},
-	})
+	JSONOK(c, http.StatusOK)
 }
 
 func (h *AuthHandler) AdminLogin(c *gin.Context) {
@@ -350,83 +543,27 @@ func (h *AuthHandler) CheckInvitation(c *gin.Context) {
 	})
 }
 
-func (h *AuthHandler) SendEmailOTP(c *gin.Context) {
-	var req struct {
-		Email string `json:"email" binding:"required,email"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		JSONError(c, http.StatusBadRequest, "invalid_request", "email is required")
-		return
-	}
-
-	invitation, err := h.queries.GetActiveInvitationByEmail(c.Request.Context(), req.Email)
-	if err != nil {
-		JSONError(c, http.StatusNotFound, "no_invitation", "No invitation found for this email. Contact your manager.")
-		return
-	}
-	if invitation.Status != db.InvitationStatusPending && invitation.Status != db.InvitationStatusSent {
-		JSONError(c, http.StatusForbidden, "invitation_not_active", "Invitation is no longer active")
-		return
-	}
-
-	code, err := generateOTP()
-	if err != nil {
-		JSONError(c, http.StatusInternalServerError, "otp_generation_failed", "Failed to generate OTP")
-		return
-	}
-
-	expiresAt := time.Now().UTC().Add(10 * time.Minute)
-	_, err = h.queries.CreateEmailOTP(c.Request.Context(), db.CreateEmailOTPParams{
-		Email:     req.Email,
-		Code:      code,
-		ExpiresAt: expiresAt,
-	})
-	if err != nil {
-		JSONError(c, http.StatusInternalServerError, "store_otp_failed", "Failed to store OTP")
-		return
-	}
-
-	JSONOK(c, http.StatusOK)
-}
-
-func (h *AuthHandler) VerifyEmailOTP(c *gin.Context) {
-	var req struct {
-		Email string `json:"email" binding:"required,email"`
-		Code  string `json:"code" binding:"required"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		JSONError(c, http.StatusBadRequest, "invalid_request", "email and code are required")
-		return
-	}
-
-	storedOTP, err := h.queries.GetEmailOTPByEmail(c.Request.Context(), req.Email)
-	if err != nil {
-		JSONError(c, http.StatusBadRequest, "invalid_otp", "Invalid or expired OTP")
-		return
-	}
-
-	if storedOTP.Code != req.Code {
-		JSONError(c, http.StatusBadRequest, "invalid_otp", "Invalid OTP code")
-		return
-	}
-
-	if err := h.queries.DeleteEmailOTP(c.Request.Context(), req.Email); err != nil {
-		JSONError(c, http.StatusInternalServerError, "cleanup_failed", "Failed to cleanup OTP")
-		return
-	}
-
-	if _, err := h.queries.AcceptInvitation(c.Request.Context(), req.Email); err != nil {
-		JSONError(c, http.StatusInternalServerError, "accept_invitation_failed", "Failed to accept invitation")
-		return
-	}
-
-	JSONOK(c, http.StatusOK)
-}
-
 func generateOTP() (string, error) {
 	n, err := rand.Int(rand.Reader, big.NewInt(1000000))
 	if err != nil {
 		return "", fmt.Errorf("generate random OTP: %w", err)
 	}
 	return fmt.Sprintf("%06d", n.Int64()), nil
+}
+
+func sanitizeUser(user db.User) gin.H {
+	return gin.H{
+		"id":                user.ID,
+		"email":             user.Email,
+		"email_verified":    user.EmailVerified,
+		"full_name":         user.FullName,
+		"phone_number":      user.PhoneNumber,
+		"phone_verified":    user.PhoneVerified,
+		"status":            user.Status,
+		"is_terms_accepted": user.IsTermsAccepted,
+		"terms_accepted_at": user.TermsAcceptedAt,
+		"terms_version":     user.TermsVersion,
+		"created_at":        user.CreatedAt,
+		"updated_at":        user.UpdatedAt,
+	}
 }
