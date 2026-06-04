@@ -28,10 +28,6 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
     return null;
   }
 
-  if (subjectType !== "admin") {
-    return <ForbiddenPage backHref="/login" backLabel="Go to Login" />;
-  }
-
   return (
     <AdminCheck>
       {children}

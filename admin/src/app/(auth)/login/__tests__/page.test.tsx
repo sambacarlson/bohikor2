@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import LoginPage from "../page";
+import AdminLoginPage from "../page";
 
 const mockPush = jest.fn();
 const mockReplace = jest.fn();
@@ -26,12 +26,12 @@ jest.mock("@/lib/auth", () => ({
 
 const { useAuth } = jest.requireMock("@/components/providers");
 const { api } = jest.requireMock("@/lib/api");
+const { setTokens } = jest.requireMock("@/lib/auth");
 
-describe("LoginPage", () => {
+describe("AdminLoginPage", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     useAuth.mockReturnValue({
-      user: null,
       admin: null,
       subjectType: null,
       loading: false,
@@ -40,77 +40,67 @@ describe("LoginPage", () => {
     });
   });
 
-  it("renders phone input and continue button", () => {
-    render(<LoginPage />);
-    expect(screen.getByText("Bohikor2")).toBeInTheDocument();
-    expect(screen.getByText("Salary Advance Pilot")).toBeInTheDocument();
+  it("renders admin login form", () => {
+    render(<AdminLoginPage />);
+    expect(screen.getByText("Bohikor2 Admin")).toBeInTheDocument();
     expect(
-      screen.getByPlaceholderText(/e.g. 671234567/)
+      screen.getByText(/enter your credentials/i)
     ).toBeInTheDocument();
-    expect(screen.getByText("Continue")).toBeInTheDocument();
+    expect(screen.getByLabelText(/email/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/password/i)).toBeInTheDocument();
+    expect(screen.getByText("Sign In")).toBeInTheDocument();
   });
 
-  it("shows login as admin link", () => {
-    render(<LoginPage />);
-    expect(screen.getByText("Login as admin")).toBeInTheDocument();
-  });
-
-  it("disables continue button when phone is empty", () => {
-    render(<LoginPage />);
-    const continueBtn = screen.getByText("Continue");
-    expect(continueBtn).toBeDisabled();
-  });
-
-  it("sends OTP when phone is entered", async () => {
-    api.post.mockResolvedValue({ data: {} });
+  it("calls api post on form submit", async () => {
+    api.post.mockResolvedValue({
+      data: { data: { access_token: "at", refresh_token: "rt" } },
+    });
+    mockRefreshSubject.mockResolvedValue(undefined);
 
     const user = userEvent.setup();
-    render(<LoginPage />);
-    await user.type(screen.getByPlaceholderText(/e.g. 671234567/), "671234567");
-    await user.click(screen.getByText("Continue"));
+    render(<AdminLoginPage />);
 
-    expect(api.post).toHaveBeenCalledWith("/api/auth/send-phone-otp", {
-      phone_number: "+237671234567",
+    await user.type(screen.getByLabelText(/email/i), "admin@example.com");
+    await user.type(screen.getByLabelText(/password/i), "password123");
+    await user.click(screen.getByText("Sign In"));
+
+    expect(api.post).toHaveBeenCalledWith("/api/auth/admin/login", {
+      email: "admin@example.com",
+      password: "password123",
     });
   });
 
-  it("shows OTP step after code sent", async () => {
-    api.post.mockResolvedValue({ data: {} });
+  it("redirects to dashboard on success", async () => {
+    api.post.mockResolvedValue({
+      data: { data: { access_token: "at", refresh_token: "rt" } },
+    });
+    mockRefreshSubject.mockResolvedValue(undefined);
 
     const user = userEvent.setup();
-    render(<LoginPage />);
-    await user.type(screen.getByPlaceholderText(/e.g. 671234567/), "671234567");
-    await user.click(screen.getByText("Continue"));
+    render(<AdminLoginPage />);
 
-    expect(screen.getByText("Verification Code")).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("000000")).toBeInTheDocument();
+    await user.type(screen.getByLabelText(/email/i), "admin@example.com");
+    await user.type(screen.getByLabelText(/password/i), "password123");
+    await user.click(screen.getByText("Sign In"));
+
+    expect(setTokens).toHaveBeenCalledWith("at", "rt");
+    expect(mockPush).toHaveBeenCalledWith("/");
   });
 
-  it("shows error when code sending fails", async () => {
+  it("shows error on invalid credentials", async () => {
     api.post.mockRejectedValue({
-      response: { data: { error: "Failed to send verification code." } },
+      response: { data: { error: "Invalid email or password" } },
     });
 
     const user = userEvent.setup();
-    render(<LoginPage />);
-    await user.type(screen.getByPlaceholderText(/e.g. 671234567/), "600000000");
-    await user.click(screen.getByText("Continue"));
+    render(<AdminLoginPage />);
+
+    await user.type(screen.getByLabelText(/email/i), "wrong@example.com");
+    await user.type(screen.getByLabelText(/password/i), "wrong");
+    await user.click(screen.getByText("Sign In"));
 
     expect(
-      screen.getByText("Failed to send verification code.")
-    ).toBeInTheDocument();
-  });
-
-  it("shows change phone number link in OTP step", async () => {
-    api.post.mockResolvedValue({ data: {} });
-
-    const user = userEvent.setup();
-    render(<LoginPage />);
-    await user.type(screen.getByPlaceholderText(/e.g. 671234567/), "671234567");
-    await user.click(screen.getByText("Continue"));
-
-    expect(
-      screen.getByText("Change phone number")
+      screen.getByText("Invalid email or password")
     ).toBeInTheDocument();
   });
 });

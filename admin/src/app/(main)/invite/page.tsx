@@ -57,9 +57,9 @@ export default function InvitePage() {
   return (
     <div>
       <div className="mb-8">
-        <h1 className="text-3xl font-bold tracking-tight">Invite Admins</h1>
+        <h1 className="text-3xl font-bold tracking-tight">Invite Employees</h1>
         <p className="text-muted-foreground">
-          Invite new admins to the Bohikor2 dashboard
+          Send invitations to employees to join the Bohikor2 platform
         </p>
       </div>
 

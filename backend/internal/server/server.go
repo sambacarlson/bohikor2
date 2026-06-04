@@ -149,7 +149,7 @@ func New(cfg *config.Config) (*Server, error) {
 	}
 
 	webhookHandler := handler.NewWebhookHandler(queries, campayClient)
-	router.POST("/api/webhooks/campay", webhookHandler.HandleCampayWebhook)
+	router.POST("/v1/webhooks/campay", webhookHandler.HandleCampayWebhook)
 
 	s := &Server{
 		cfg:    cfg,

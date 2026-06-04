@@ -8,10 +8,10 @@ import { useAuth } from "@/components/providers";
 import { LayoutDashboard, Mail, Users, ArrowLeftRight, LogOut } from "lucide-react";
 
 const navItems = [
-  { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/admin/invite", label: "Invite", icon: Mail },
-  { href: "/admin/users", label: "Users", icon: Users },
-  { href: "/admin/requests", label: "Requests", icon: ArrowLeftRight },
+  { href: "/", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/invite", label: "Invite", icon: Mail },
+  { href: "/users", label: "Users", icon: Users },
+  { href: "/requests", label: "Requests", icon: ArrowLeftRight },
 ];
 
 export function Sidebar() {

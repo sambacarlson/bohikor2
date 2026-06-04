@@ -585,10 +585,10 @@ func TestWebhook_MissingSignatureField(t *testing.T) {
 	h := NewWebhookHandler(q, v)
 
 	r := makeTestGin()
-	r.POST("/api/webhooks/campay", h.HandleCampayWebhook)
+	r.POST("/v1/webhooks/campay", h.HandleCampayWebhook)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequestWithContext(context.Background(), "POST", "/api/webhooks/campay",
+	req, _ := http.NewRequestWithContext(context.Background(), "POST", "/v1/webhooks/campay",
 		strings.NewReader(`{"reference":"ref-1","status":"SUCCESSFUL"}`))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
@@ -604,10 +604,10 @@ func TestWebhook_InvalidSignature(t *testing.T) {
 	h := NewWebhookHandler(q, v)
 
 	r := makeTestGin()
-	r.POST("/api/webhooks/campay", h.HandleCampayWebhook)
+	r.POST("/v1/webhooks/campay", h.HandleCampayWebhook)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequestWithContext(context.Background(), "POST", "/api/webhooks/campay",
+	req, _ := http.NewRequestWithContext(context.Background(), "POST", "/v1/webhooks/campay",
 		strings.NewReader(`{"reference":"ref-1","status":"SUCCESSFUL","signature":"invalid-jwt"}`))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
@@ -632,10 +632,10 @@ func TestWebhook_SuccessStatus(t *testing.T) {
 	h := NewWebhookHandler(q, v)
 
 	r := makeTestGin()
-	r.POST("/api/webhooks/campay", h.HandleCampayWebhook)
+	r.POST("/v1/webhooks/campay", h.HandleCampayWebhook)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequestWithContext(context.Background(), "POST", "/api/webhooks/campay",
+	req, _ := http.NewRequestWithContext(context.Background(), "POST", "/v1/webhooks/campay",
 		strings.NewReader(`{"reference":"ref-1","status":"SUCCESSFUL","signature":"valid-jwt"}`))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
@@ -660,10 +660,10 @@ func TestWebhook_FailedStatus(t *testing.T) {
 	h := NewWebhookHandler(q, v)
 
 	r := makeTestGin()
-	r.POST("/api/webhooks/campay", h.HandleCampayWebhook)
+	r.POST("/v1/webhooks/campay", h.HandleCampayWebhook)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequestWithContext(context.Background(), "POST", "/api/webhooks/campay",
+	req, _ := http.NewRequestWithContext(context.Background(), "POST", "/v1/webhooks/campay",
 		strings.NewReader(`{"reference":"ref-1","status":"FAILED","signature":"valid-jwt","reason":"insufficient balance"}`))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
@@ -679,10 +679,10 @@ func TestWebhook_UnknownReference(t *testing.T) {
 	h := NewWebhookHandler(q, v)
 
 	r := makeTestGin()
-	r.POST("/api/webhooks/campay", h.HandleCampayWebhook)
+	r.POST("/v1/webhooks/campay", h.HandleCampayWebhook)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequestWithContext(context.Background(), "POST", "/api/webhooks/campay",
+	req, _ := http.NewRequestWithContext(context.Background(), "POST", "/v1/webhooks/campay",
 		strings.NewReader(`{"reference":"unknown-ref","status":"SUCCESSFUL","signature":"valid-jwt"}`))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
@@ -698,10 +698,10 @@ func TestWebhook_EmptyReference(t *testing.T) {
 	h := NewWebhookHandler(q, v)
 
 	r := makeTestGin()
-	r.POST("/api/webhooks/campay", h.HandleCampayWebhook)
+	r.POST("/v1/webhooks/campay", h.HandleCampayWebhook)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequestWithContext(context.Background(), "POST", "/api/webhooks/campay",
+	req, _ := http.NewRequestWithContext(context.Background(), "POST", "/v1/webhooks/campay",
 		strings.NewReader(`{"reference":"","status":"SUCCESSFUL","signature":"valid-jwt"}`))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
@@ -717,10 +717,10 @@ func TestWebhook_InvalidJSON(t *testing.T) {
 	h := NewWebhookHandler(q, v)
 
 	r := makeTestGin()
-	r.POST("/api/webhooks/campay", h.HandleCampayWebhook)
+	r.POST("/v1/webhooks/campay", h.HandleCampayWebhook)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequestWithContext(context.Background(), "POST", "/api/webhooks/campay",
+	req, _ := http.NewRequestWithContext(context.Background(), "POST", "/v1/webhooks/campay",
 		strings.NewReader(`not json`))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)

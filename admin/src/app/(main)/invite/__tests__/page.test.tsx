@@ -47,7 +47,7 @@ describe("InvitePage", () => {
     renderWithProviders(<InvitePage />);
 
     expect(
-      screen.getByRole("heading", { name: /invite admins/i })
+      screen.getByRole("heading", { name: /invite employees/i })
     ).toBeInTheDocument();
     expect(screen.getByLabelText(/email address/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /invite/i })).toBeInTheDocument();
