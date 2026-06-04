@@ -5,13 +5,14 @@ import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/components/providers";
-import { LayoutDashboard, Mail, Users, ArrowLeftRight, LogOut } from "lucide-react";
+import { LayoutDashboard, Mail, Users, ArrowLeftRight, Settings, LogOut } from "lucide-react";
 
 const navItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/invite", label: "Invite", icon: Mail },
   { href: "/users", label: "Users", icon: Users },
   { href: "/requests", label: "Requests", icon: ArrowLeftRight },
+  { href: "/settings", label: "Settings", icon: Settings },
 ];
 
 export function Sidebar() {

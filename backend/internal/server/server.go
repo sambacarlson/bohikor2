@@ -13,7 +13,6 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/shopspring/decimal"
 
 	db "github.com/Iknite-Space/bohikor2/db/sqlc"
 	"github.com/Iknite-Space/bohikor2/internal/authjwt"
@@ -132,13 +131,20 @@ func New(cfg *config.Config) (*Server, error) {
 		userGroup.GET("/phone-verification", handler.NewPhoneHandler(queries, campayClient, cfg.CampayPhoneVerificationAmount).GetPhoneVerificationStatus)
 	}
 
-	advanceHandler := handler.NewAdvanceHandler(queries, campayClient, decimal.NewFromInt(10000))
+	loc, err := cfg.LoadLocation()
+	if err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("load timezone: %w", err)
+	}
+
+	advanceHandler := handler.NewAdvanceHandler(queries, campayClient, queries, loc)
 	advanceGroup := router.Group("/api/advance-requests")
 	advanceGroup.Use(authMiddleware)
 	advanceGroup.Use(middleware.RequireActiveUser(queries))
 	{
 		advanceGroup.POST("", advanceHandler.CreateRequest)
 		advanceGroup.GET("", advanceHandler.ListUserRequests)
+		advanceGroup.GET("/eligibility", advanceHandler.GetEligibility)
 	}
 
 	adminAdvanceGroup := router.Group("/api/admin/requests")
@@ -147,6 +153,11 @@ func New(cfg *config.Config) (*Server, error) {
 	{
 		adminAdvanceGroup.GET("", handler.HandleListAdminRequests(queries))
 	}
+
+	adminGroup.PUT("/users/:id/suspend", handler.HandleSuspendUser(queries))
+	adminGroup.PUT("/users/:id/activate", handler.HandleActivateUser(queries))
+	adminGroup.GET("/settings", handler.HandleListSettings(queries))
+	adminGroup.PUT("/settings", handler.HandleUpdateSettings(queries))
 
 	webhookHandler := handler.NewWebhookHandler(queries, campayClient)
 	router.POST("/v1/webhooks/campay", webhookHandler.HandleCampayWebhook)

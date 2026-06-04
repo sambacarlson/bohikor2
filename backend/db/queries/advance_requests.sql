@@ -38,3 +38,12 @@ UPDATE advance_requests SET
     campay_payout_ref = $5,
     updated_at = NOW()
 WHERE id = $1 RETURNING *;
+
+-- name: CountAdvanceRequestsByUserToday :one
+SELECT COUNT(*) FROM advance_requests
+WHERE user_id = $1 AND created_at::date = CURRENT_DATE;
+
+-- name: CountSuccessfulAdvanceRequestsByUserThisMonth :one
+SELECT COUNT(*) FROM advance_requests
+WHERE user_id = $1 AND status = 'success'
+    AND date_trunc('month', created_at) = date_trunc('month', CURRENT_DATE);

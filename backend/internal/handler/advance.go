@@ -5,8 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"log/slog"
-	"math/big"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -25,6 +25,13 @@ type advanceQuerier interface {
 	UpdateAdvanceRequestStatus(ctx context.Context, arg db.UpdateAdvanceRequestStatusParams) (db.AdvanceRequest, error)
 	CreateEvent(ctx context.Context, arg db.CreateEventParams) (db.Event, error)
 	ListAdvanceRequestsByUserID(ctx context.Context, userID uuid.UUID) ([]db.AdvanceRequest, error)
+	CountAdvanceRequestsByUserToday(ctx context.Context, userID uuid.UUID) (int64, error)
+	CountSuccessfulAdvanceRequestsByUserThisMonth(ctx context.Context, userID uuid.UUID) (int64, error)
+}
+
+type advanceSettingsQuerier interface {
+	GetSetting(ctx context.Context, key string) (db.Setting, error)
+	ListSettings(ctx context.Context) ([]db.Setting, error)
 }
 
 type campayTransferer interface {
@@ -32,21 +39,154 @@ type campayTransferer interface {
 }
 
 type AdvanceHandler struct {
-	queries       advanceQuerier
-	campayClient  campayTransferer
-	advanceAmount pgtype.Numeric
+	queries      advanceQuerier
+	campayClient campayTransferer
+	settings     advanceSettingsQuerier
+	loc          *time.Location
 }
 
-func NewAdvanceHandler(queries advanceQuerier, campayClient campayTransferer, advanceAmount decimal.Decimal) *AdvanceHandler {
-	var amount pgtype.Numeric
-	if err := amount.Scan(advanceAmount.String()); err != nil {
-		slog.Error("scan advance amount", "error", err)
-	}
+func NewAdvanceHandler(queries advanceQuerier, campayClient campayTransferer, settings advanceSettingsQuerier, loc *time.Location) *AdvanceHandler {
 	return &AdvanceHandler{
-		queries:       queries,
-		campayClient:  campayClient,
-		advanceAmount: amount,
+		queries:      queries,
+		campayClient: campayClient,
+		settings:     settings,
+		loc:          loc,
 	}
+}
+
+type parsedSettings struct {
+	killSwitchEnabled bool
+	windowStartDay    int
+	windowEndDay      int
+	dailyLimit        int
+	monthlyLimit      int
+	advanceAmount     decimal.Decimal
+}
+
+// parseJSONFloat tries native JSON number parsing first, then string fallback.
+// Handles both correctly-stored numbers and legacy string-encoded values.
+func parseJSONFloat(raw []byte) (float64, bool) {
+	var v float64
+	if json.Unmarshal(raw, &v) == nil {
+		return v, true
+	}
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		if f, err := strconv.ParseFloat(s, 64); err == nil {
+			return f, true
+		}
+	}
+	return 0, false
+}
+
+// parseJSONBool tries native JSON bool parsing first, then string fallback
+// (e.g. "true"/"false" stored as JSON string by legacy admin UI).
+func parseJSONBool(raw []byte) (bool, bool) {
+	var v bool
+	if json.Unmarshal(raw, &v) == nil {
+		return v, true
+	}
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		if b, err := strconv.ParseBool(s); err == nil {
+			return b, true
+		}
+	}
+	return false, false
+}
+
+// loadSettings reads all settings from the DB. Missing or unparseable keys
+// fall back to defaults (advanceAmount=10000, limits=0/unlimited).
+func (h *AdvanceHandler) loadSettings(ctx context.Context) (*parsedSettings, error) {
+	all, err := h.settings.ListSettings(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ps := &parsedSettings{
+		advanceAmount: decimal.NewFromInt(10000),
+	}
+	for _, s := range all {
+		switch s.Key {
+		case "kill_switch_enabled":
+			if v, ok := parseJSONBool(s.Value); ok {
+				ps.killSwitchEnabled = v
+			}
+		case "request_window_start_day":
+			if v, ok := parseJSONFloat(s.Value); ok {
+				ps.windowStartDay = int(v)
+			}
+		case "request_window_end_day":
+			if v, ok := parseJSONFloat(s.Value); ok {
+				ps.windowEndDay = int(v)
+			}
+		case "daily_request_limit":
+			if v, ok := parseJSONFloat(s.Value); ok {
+				ps.dailyLimit = int(v)
+			}
+		case "monthly_request_limit":
+			if v, ok := parseJSONFloat(s.Value); ok {
+				ps.monthlyLimit = int(v)
+			}
+		case "advance_amount_xaf":
+			if v, ok := parseJSONFloat(s.Value); ok {
+				ps.advanceAmount = decimal.NewFromFloat(v)
+			}
+		}
+	}
+	return ps, nil
+}
+
+func (h *AdvanceHandler) checkKillSwitch(ps *parsedSettings) string {
+	if ps.killSwitchEnabled {
+		return "advance requests are currently disabled by the system administrator"
+	}
+	return ""
+}
+
+func (h *AdvanceHandler) checkRequestWindow(ps *parsedSettings) string {
+	now := time.Now().In(h.loc)
+	day := now.Day()
+	daysInMonth := daysIn(now.Year(), now.Month())
+
+	endDay := ps.windowEndDay
+	if endDay <= 0 || endDay > daysInMonth {
+		endDay = daysInMonth
+	}
+
+	if day < ps.windowStartDay || day > endDay {
+		return "advance requests are only accepted between the " + ordinal(ps.windowStartDay) + " and " + ordinal(endDay) + " of the month"
+	}
+	return ""
+}
+
+func (h *AdvanceHandler) checkDailyLimit(ctx context.Context, ps *parsedSettings, userID uuid.UUID) (string, int, error) {
+	if ps.dailyLimit <= 0 {
+		return "", 0, nil
+	}
+	count, err := h.queries.CountAdvanceRequestsByUserToday(ctx, userID)
+	if err != nil {
+		return "", 0, err
+	}
+	remaining := ps.dailyLimit - int(count)
+	if remaining <= 0 {
+		return "daily request limit reached (" + itoa(ps.dailyLimit) + "/" + itoa(ps.dailyLimit) + ")", 0, nil
+	}
+	return "", remaining, nil
+}
+
+func (h *AdvanceHandler) checkMonthlyLimit(ctx context.Context, ps *parsedSettings, userID uuid.UUID) (string, int, error) {
+	if ps.monthlyLimit <= 0 {
+		return "", 0, nil
+	}
+	count, err := h.queries.CountSuccessfulAdvanceRequestsByUserThisMonth(ctx, userID)
+	if err != nil {
+		return "", 0, err
+	}
+	remaining := ps.monthlyLimit - int(count)
+	if remaining <= 0 {
+		return "monthly request limit reached (" + itoa(ps.monthlyLimit) + "/" + itoa(ps.monthlyLimit) + ")", 0, nil
+	}
+	return "", remaining, nil
 }
 
 func (h *AdvanceHandler) CreateRequest(c *gin.Context) {
@@ -85,9 +225,51 @@ func (h *AdvanceHandler) CreateRequest(c *gin.Context) {
 		return
 	}
 
+	ps, err := h.loadSettings(ctx)
+	if err != nil {
+		slog.Error("load settings", "error", err)
+		JSONError(c, http.StatusInternalServerError, "internal_error", "failed to load settings")
+		return
+	}
+
+	if msg := h.checkKillSwitch(ps); msg != "" {
+		JSONError(c, http.StatusForbidden, "kill_switch_active", msg)
+		return
+	}
+
+	if msg := h.checkRequestWindow(ps); msg != "" {
+		JSONError(c, http.StatusForbidden, "outside_request_window", msg)
+		return
+	}
+
+	if msg, _, err := h.checkDailyLimit(ctx, ps, userID); err != nil {
+		slog.Error("check daily limit", "error", err)
+		JSONError(c, http.StatusInternalServerError, "internal_error", "failed to check daily limit")
+		return
+	} else if msg != "" {
+		JSONError(c, http.StatusForbidden, "daily_limit_reached", msg)
+		return
+	}
+
+	if msg, _, err := h.checkMonthlyLimit(ctx, ps, userID); err != nil {
+		slog.Error("check monthly limit", "error", err)
+		JSONError(c, http.StatusInternalServerError, "internal_error", "failed to check monthly limit")
+		return
+	} else if msg != "" {
+		JSONError(c, http.StatusForbidden, "monthly_limit_reached", msg)
+		return
+	}
+
+	var amount pgtype.Numeric
+	if err := amount.Scan(ps.advanceAmount.String()); err != nil {
+		slog.Error("scan advance amount", "error", err)
+		JSONError(c, http.StatusInternalServerError, "internal_error", "failed to parse advance amount")
+		return
+	}
+
 	newReq, err := h.queries.CreateAdvanceRequest(ctx, db.CreateAdvanceRequestParams{
 		UserID:    userID,
-		AmountXaf: h.advanceAmount,
+		AmountXaf: amount,
 		Status:    db.RequestStatusInitiated,
 	})
 	if err != nil {
@@ -98,7 +280,7 @@ func (h *AdvanceHandler) CreateRequest(c *gin.Context) {
 
 	metadata, _ := json.Marshal(map[string]interface{}{
 		"request_id": newReq.ID,
-		"amount_xaf": h.advanceAmount,
+		"amount_xaf": ps.advanceAmount.String(),
 	})
 	_, _ = h.queries.CreateEvent(ctx, db.CreateEventParams{
 		UserID:    pgtype.UUID{Bytes: userID, Valid: true},
@@ -107,12 +289,7 @@ func (h *AdvanceHandler) CreateRequest(c *gin.Context) {
 	})
 
 	description := "Bohikor2 salary advance"
-	amountDec, err := numericToDecimal(h.advanceAmount)
-	if err != nil {
-		slog.Error("convert advance amount", "error", err)
-		amountDec = decimal.NewFromInt(10000)
-	}
-	transferResp, transferErr := h.campayClient.InitiateTransfer(ctx, user.PhoneNumber.String, amountDec, description, newReq.ID.String())
+	transferResp, transferErr := h.campayClient.InitiateTransfer(ctx, user.PhoneNumber.String, ps.advanceAmount, description, newReq.ID.String())
 
 	if transferErr != nil {
 		slog.Error("campay transfer failed", "error", transferErr, "request_id", newReq.ID)
@@ -194,6 +371,110 @@ func (h *AdvanceHandler) CreateRequest(c *gin.Context) {
 	}
 
 	JSONSuccess(c, http.StatusCreated, newReq)
+}
+
+// GetEligibility evaluates all pre-conditions (kill switch, request window,
+// daily/monthly limits, terms, phone, active request) and returns status + reasons.
+func (h *AdvanceHandler) GetEligibility(c *gin.Context) {
+	val, exists := c.Get("user_id")
+	if !exists {
+		JSONError(c, http.StatusUnauthorized, "unauthorized", "user not authenticated")
+		return
+	}
+	userID, ok := val.(uuid.UUID)
+	if !ok {
+		JSONError(c, http.StatusInternalServerError, "internal_error", "invalid user ID")
+		return
+	}
+
+	ctx := c.Request.Context()
+
+	user, err := h.queries.GetUserByID(ctx, userID)
+	if err != nil {
+		JSONError(c, http.StatusNotFound, "not_found", "user not found")
+		return
+	}
+
+	ps, err := h.loadSettings(ctx)
+	if err != nil {
+		slog.Error("load settings for eligibility", "error", err)
+		JSONError(c, http.StatusInternalServerError, "internal_error", "failed to load settings")
+		return
+	}
+
+	reasons := []string{}
+	eligible := true
+
+	if msg := h.checkKillSwitch(ps); msg != "" {
+		reasons = append(reasons, msg)
+		eligible = false
+	}
+
+	windowMsg := h.checkRequestWindow(ps)
+	inWindow := windowMsg == ""
+	if windowMsg != "" {
+		reasons = append(reasons, windowMsg)
+		eligible = false
+	}
+
+	dailyMsg, dailyRemaining, err := h.checkDailyLimit(ctx, ps, userID)
+	if err != nil {
+		slog.Error("check daily limit for eligibility", "error", err)
+	}
+	if dailyMsg != "" {
+		reasons = append(reasons, dailyMsg)
+		eligible = false
+	}
+
+	monthlyMsg, monthlyRemaining, err := h.checkMonthlyLimit(ctx, ps, userID)
+	if err != nil {
+		slog.Error("check monthly limit for eligibility", "error", err)
+	}
+	if monthlyMsg != "" {
+		reasons = append(reasons, monthlyMsg)
+		eligible = false
+	}
+
+	if !user.IsTermsAccepted {
+		reasons = append(reasons, "terms not accepted")
+		eligible = false
+	}
+
+	if !user.PhoneVerified || !user.PhoneNumber.Valid || user.PhoneNumber.String == "" {
+		reasons = append(reasons, "phone not verified")
+		eligible = false
+	}
+
+	_, activeErr := h.queries.GetActiveRequestByUserID(ctx, userID)
+	if activeErr == nil {
+		reasons = append(reasons, "you already have an active advance request")
+		eligible = false
+	}
+
+	now := time.Now().In(h.loc)
+	daysInMonth := daysIn(now.Year(), now.Month())
+	endDay := ps.windowEndDay
+	if endDay <= 0 || endDay > daysInMonth {
+		endDay = daysInMonth
+	}
+
+	type windowInfo struct {
+		StartDay int  `json:"start_day"`
+		EndDay   int  `json:"end_day"`
+		InWindow bool `json:"in_window"`
+	}
+
+	JSONSuccess(c, http.StatusOK, gin.H{
+		"eligible":                   eligible,
+		"reasons":                    reasons,
+		"kill_switch_active":         ps.killSwitchEnabled,
+		"request_window":             windowInfo{StartDay: ps.windowStartDay, EndDay: endDay, InWindow: inWindow},
+		"daily_requests_remaining":   dailyRemaining,
+		"monthly_requests_remaining": monthlyRemaining,
+		"advance_amount_xaf":         ps.advanceAmount.String(),
+		"phone_verified":             user.PhoneVerified,
+		"terms_accepted":             user.IsTermsAccepted,
+	})
 }
 
 func (h *AdvanceHandler) ListUserRequests(c *gin.Context) {
@@ -473,13 +754,48 @@ func HandleAcceptTerms(q userTermsQuerier) gin.HandlerFunc {
 	}
 }
 
-func numericToDecimal(n pgtype.Numeric) (decimal.Decimal, error) {
-	if !n.Valid {
-		return decimal.Zero, nil
+func daysIn(year int, m time.Month) int {
+	return time.Date(year, m+1, 0, 0, 0, 0, 0, time.UTC).Day()
+}
+
+func ordinal(n int) string {
+	suffix := "th"
+	switch n % 10 {
+	case 1:
+		if n%100 != 11 {
+			suffix = "st"
+		}
+	case 2:
+		if n%100 != 12 {
+			suffix = "nd"
+		}
+	case 3:
+		if n%100 != 13 {
+			suffix = "rd"
+		}
 	}
-	var bi big.Int
-	if n.Int != nil {
-		bi.Set(n.Int)
+	return itoa(n) + suffix
+}
+
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
 	}
-	return decimal.NewFromBigInt(&bi, n.Exp), nil
+	var buf [12]byte
+	i := len(buf)
+	neg := false
+	if n < 0 {
+		neg = true
+		n = -n
+	}
+	for n > 0 {
+		i--
+		buf[i] = byte('0' + n%10)
+		n /= 10
+	}
+	if neg {
+		i--
+		buf[i] = '-'
+	}
+	return string(buf[i:])
 }

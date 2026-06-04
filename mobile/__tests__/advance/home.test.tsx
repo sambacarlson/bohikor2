@@ -1,4 +1,5 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react-native";
+import { render, screen, fireEvent } from "@testing-library/react-native";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import HomeScreen from "@/app/(app)/home";
 
 const mockRouter = { push: jest.fn(), back: jest.fn(), replace: jest.fn() };
@@ -48,6 +49,31 @@ jest.mock("@/src/hooks/use-advance", () => ({
   useAdvanceRequests: () => ({}),
 }));
 
+jest.mock("@/src/hooks/use-eligibility", () => ({
+  useEligibility: () => ({
+    data: {
+      eligible: true,
+      reasons: [],
+      kill_switch_active: false,
+      request_window: { start_day: 1, end_day: 31, in_window: true },
+      daily_requests_remaining: 1,
+      monthly_requests_remaining: 3,
+      advance_amount_xaf: "10000",
+      phone_verified: true,
+      terms_accepted: true,
+    },
+    isLoading: false,
+    isError: false,
+  }),
+}));
+
+function renderWithProviders(ui: React.ReactElement) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return render(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>);
+}
+
 describe("HomeScreen", () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -55,55 +81,55 @@ describe("HomeScreen", () => {
   });
 
   it("shows Request Advance button", () => {
-    render(<HomeScreen />);
+    renderWithProviders(<HomeScreen />);
     expect(screen.getByTestId("request-advance-button")).toBeTruthy();
     expect(screen.getByText("Request Advance")).toBeTruthy();
-    expect(screen.getByText("10,000 XAF")).toBeTruthy();
+    expect(screen.getAllByText("10000 XAF").length).toBe(2);
   });
 
   it("shows user email and phone in Your Information card", () => {
-    render(<HomeScreen />);
+    renderWithProviders(<HomeScreen />);
     expect(screen.getByText("Your Information")).toBeTruthy();
     expect(screen.getByText("test@example.com")).toBeTruthy();
     expect(screen.getByText("+237600000000")).toBeTruthy();
   });
 
   it("shows terms accepted status", () => {
-    render(<HomeScreen />);
+    renderWithProviders(<HomeScreen />);
     expect(screen.getByText("Accepted")).toBeTruthy();
   });
 
   it("shows account status", () => {
-    render(<HomeScreen />);
+    renderWithProviders(<HomeScreen />);
     expect(screen.getByText("active")).toBeTruthy();
   });
 
   it("shows View Transaction History link", () => {
-    render(<HomeScreen />);
+    renderWithProviders(<HomeScreen />);
     expect(screen.getByText("View Transaction History")).toBeTruthy();
   });
 
   it("navigates to history when View Transaction History is tapped", () => {
-    render(<HomeScreen />);
+    renderWithProviders(<HomeScreen />);
     fireEvent.press(screen.getByTestId("view-history-link"));
     expect(mockRouter.push).toHaveBeenCalled();
   });
 
   it("renders dropdown menu button", () => {
-    render(<HomeScreen />);
+    renderWithProviders(<HomeScreen />);
     expect(screen.getByTestId("menu-button")).toBeTruthy();
   });
 
   it("shows Not accepted when terms not accepted", () => {
     mockUser.is_terms_accepted = false;
-    render(<HomeScreen />);
+    renderWithProviders(<HomeScreen />);
     expect(screen.getByText("Not accepted")).toBeTruthy();
     mockUser.is_terms_accepted = true;
   });
 
   it("shows terms warning when terms not accepted", () => {
     mockUser.is_terms_accepted = false;
-    render(<HomeScreen />);
+    renderWithProviders(<HomeScreen />);
     expect(screen.getByText("Terms not accepted")).toBeTruthy();
     mockUser.is_terms_accepted = true;
   });

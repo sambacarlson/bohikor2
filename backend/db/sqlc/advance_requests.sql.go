@@ -13,6 +13,31 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countAdvanceRequestsByUserToday = `-- name: CountAdvanceRequestsByUserToday :one
+SELECT COUNT(*) FROM advance_requests
+WHERE user_id = $1 AND created_at::date = CURRENT_DATE
+`
+
+func (q *Queries) CountAdvanceRequestsByUserToday(ctx context.Context, userID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countAdvanceRequestsByUserToday, userID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countSuccessfulAdvanceRequestsByUserThisMonth = `-- name: CountSuccessfulAdvanceRequestsByUserThisMonth :one
+SELECT COUNT(*) FROM advance_requests
+WHERE user_id = $1 AND status = 'success'
+    AND date_trunc('month', created_at) = date_trunc('month', CURRENT_DATE)
+`
+
+func (q *Queries) CountSuccessfulAdvanceRequestsByUserThisMonth(ctx context.Context, userID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countSuccessfulAdvanceRequestsByUserThisMonth, userID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createAdvanceRequest = `-- name: CreateAdvanceRequest :one
 INSERT INTO advance_requests (user_id, amount_xaf, status)
 VALUES ($1, $2, $3) RETURNING id, user_id, amount_xaf, status, campay_payout_ref, failure_reason, payout_duration_seconds, created_at, updated_at

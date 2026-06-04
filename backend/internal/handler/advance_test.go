@@ -33,6 +33,8 @@ type mockAdvanceQuerier struct {
 	createErr      error
 	updateErr      error
 	listErr        error
+	countToday     int64
+	countThisMonth int64
 }
 
 func (m *mockAdvanceQuerier) GetUserByID(ctx context.Context, id uuid.UUID) (db.User, error) {
@@ -97,6 +99,56 @@ func (m *mockAdvanceQuerier) ListAdvanceRequestsByUserID(ctx context.Context, us
 	return m.requests, nil
 }
 
+func (m *mockAdvanceQuerier) CountAdvanceRequestsByUserToday(ctx context.Context, userID uuid.UUID) (int64, error) {
+	return m.countToday, nil
+}
+
+func (m *mockAdvanceQuerier) CountSuccessfulAdvanceRequestsByUserThisMonth(ctx context.Context, userID uuid.UUID) (int64, error) {
+	return m.countThisMonth, nil
+}
+
+type mockAdvanceSettingsQuerier struct {
+	settings []db.Setting
+	err      error
+}
+
+func defaultMockSettings() []db.Setting {
+	return []db.Setting{
+		{Key: "kill_switch_enabled", Value: []byte("false")},
+		{Key: "request_window_start_day", Value: []byte("1")},
+		{Key: "request_window_end_day", Value: []byte("31")},
+		{Key: "daily_request_limit", Value: []byte("1")},
+		{Key: "monthly_request_limit", Value: []byte("3")},
+		{Key: "advance_amount_xaf", Value: []byte("10000")},
+	}
+}
+
+func (m *mockAdvanceSettingsQuerier) ListSettings(ctx context.Context) ([]db.Setting, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	if m.settings == nil {
+		return defaultMockSettings(), nil
+	}
+	return m.settings, nil
+}
+
+func (m *mockAdvanceSettingsQuerier) GetSetting(ctx context.Context, key string) (db.Setting, error) {
+	if m.settings == nil {
+		for _, s := range defaultMockSettings() {
+			if s.Key == key {
+				return s, nil
+			}
+		}
+	}
+	for _, s := range m.settings {
+		if s.Key == key {
+			return s, nil
+		}
+	}
+	return db.Setting{}, errTestNotFound
+}
+
 type mockCampayTransferer struct {
 	resp *campay.TransferResponse
 	err  error
@@ -157,7 +209,7 @@ func TestCreateRequest_NotTermsAccepted(t *testing.T) {
 			LockedUntil:         sql.NullTime{},
 		},
 	}
-	h := NewAdvanceHandler(q, &mockCampayTransferer{}, decimal.NewFromInt(10000))
+	h := NewAdvanceHandler(q, &mockCampayTransferer{}, &mockAdvanceSettingsQuerier{}, time.UTC)
 
 	r := makeTestGin()
 	r.POST("/api/advance-requests", func(c *gin.Context) {
@@ -195,8 +247,8 @@ func TestCreateRequest_ActiveRequestExists(t *testing.T) {
 			Status: db.RequestStatusInitiated,
 		},
 	}
-	h := NewAdvanceHandler(q, &mockCampayTransferer{}, decimal.NewFromInt(10000))
-
+	h := NewAdvanceHandler(q, &mockCampayTransferer{}, &mockAdvanceSettingsQuerier{}, time.UTC)
+	_ = h
 	r := makeTestGin()
 	r.POST("/api/advance-requests", func(c *gin.Context) {
 		setUserContext(c, userID)
@@ -228,7 +280,7 @@ func TestCreateRequest_PhoneNotVerified(t *testing.T) {
 			LockedUntil:         sql.NullTime{},
 		},
 	}
-	h := NewAdvanceHandler(q, &mockCampayTransferer{}, decimal.NewFromInt(10000))
+	h := NewAdvanceHandler(q, &mockCampayTransferer{}, &mockAdvanceSettingsQuerier{}, time.UTC)
 
 	r := makeTestGin()
 	r.POST("/api/advance-requests", func(c *gin.Context) {
@@ -267,7 +319,7 @@ func TestCreateRequest_TransferSuccess(t *testing.T) {
 			Status:    "SUCCESSFUL",
 		},
 	}
-	h := NewAdvanceHandler(q, transferMock, decimal.NewFromInt(10000))
+	h := NewAdvanceHandler(q, transferMock, &mockAdvanceSettingsQuerier{}, time.UTC)
 
 	r := makeTestGin()
 	r.POST("/api/advance-requests", func(c *gin.Context) {
@@ -311,7 +363,7 @@ func TestCreateRequest_TransferPending(t *testing.T) {
 			Status:    "PENDING",
 		},
 	}
-	h := NewAdvanceHandler(q, transferMock, decimal.NewFromInt(10000))
+	h := NewAdvanceHandler(q, transferMock, &mockAdvanceSettingsQuerier{}, time.UTC)
 
 	r := makeTestGin()
 	r.POST("/api/advance-requests", func(c *gin.Context) {
@@ -352,7 +404,7 @@ func TestCreateRequest_TransferFailed(t *testing.T) {
 	transferMock := &mockCampayTransferer{
 		err: errors.New("transfer failed: insufficient funds"),
 	}
-	h := NewAdvanceHandler(q, transferMock, decimal.NewFromInt(10000))
+	h := NewAdvanceHandler(q, transferMock, &mockAdvanceSettingsQuerier{}, time.UTC)
 
 	r := makeTestGin()
 	r.POST("/api/advance-requests", func(c *gin.Context) {
@@ -391,7 +443,7 @@ func TestCreateRequest_RequireActiveUser_ShouldBeEnforcedByMiddleware(t *testing
 			Status:    "SUCCESSFUL",
 		},
 	}
-	h := NewAdvanceHandler(q, transferMock, decimal.NewFromInt(10000))
+	h := NewAdvanceHandler(q, transferMock, &mockAdvanceSettingsQuerier{}, time.UTC)
 
 	r := makeTestGin()
 	r.POST("/api/advance-requests", func(c *gin.Context) {
@@ -413,7 +465,7 @@ func TestCreateRequest_RequireActiveUser_ShouldBeEnforcedByMiddleware(t *testing
 func TestListUserRequests_Empty(t *testing.T) {
 	userID := uuid.New()
 	q := &mockAdvanceQuerier{}
-	h := NewAdvanceHandler(q, &mockCampayTransferer{}, decimal.NewFromInt(10000))
+	h := NewAdvanceHandler(q, &mockCampayTransferer{}, &mockAdvanceSettingsQuerier{}, time.UTC)
 
 	r := makeTestGin()
 	r.GET("/api/advance-requests", func(c *gin.Context) {
@@ -443,7 +495,7 @@ func TestListUserRequests_WithData(t *testing.T) {
 			{ID: reqID, UserID: userID, Status: db.RequestStatusSuccess, CreatedAt: time.Now().UTC()},
 		},
 	}
-	h := NewAdvanceHandler(q, &mockCampayTransferer{}, decimal.NewFromInt(10000))
+	h := NewAdvanceHandler(q, &mockCampayTransferer{}, &mockAdvanceSettingsQuerier{}, time.UTC)
 
 	r := makeTestGin()
 	r.GET("/api/advance-requests", func(c *gin.Context) {
@@ -803,7 +855,7 @@ func TestRequireActiveUser_Unauthenticated(t *testing.T) {
 			LockedUntil:         sql.NullTime{},
 		},
 	}
-	h := NewAdvanceHandler(q, &mockCampayTransferer{}, decimal.NewFromInt(10000))
+	h := NewAdvanceHandler(q, &mockCampayTransferer{}, &mockAdvanceSettingsQuerier{}, time.UTC)
 
 	r := makeTestGin()
 	r.POST("/api/advance-requests", h.CreateRequest)

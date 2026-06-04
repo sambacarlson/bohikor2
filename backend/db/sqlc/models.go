@@ -174,6 +174,16 @@ type EmailOtp struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+type EmailOtpFailure struct {
+	Email                string       `json:"email"`
+	ConsecutiveFailures  int32        `json:"consecutive_failures"`
+	LastFailureDate      pgtype.Date  `json:"last_failure_date"`
+	BlockedUntil         sql.NullTime `json:"blocked_until"`
+	IsPermanentlyBlocked bool         `json:"is_permanently_blocked"`
+	CreatedAt            time.Time    `json:"created_at"`
+	UpdatedAt            time.Time    `json:"updated_at"`
+}
+
 type Event struct {
 	ID        uuid.UUID   `json:"id"`
 	UserID    pgtype.UUID `json:"user_id"`
@@ -212,6 +222,13 @@ type RefreshToken struct {
 	SubjectType string    `json:"subject_type"`
 	ExpiresAt   time.Time `json:"expires_at"`
 	CreatedAt   time.Time `json:"created_at"`
+}
+
+type Setting struct {
+	Key       string      `json:"key"`
+	Value     []byte      `json:"value"`
+	UpdatedAt time.Time   `json:"updated_at"`
+	UpdatedBy pgtype.UUID `json:"updated_by"`
 }
 
 type User struct {

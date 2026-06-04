@@ -14,6 +14,9 @@ import (
 type usersQuerier interface {
 	ListUsers(ctx context.Context, arg db.ListUsersParams) ([]db.User, error)
 	UnlockUser(ctx context.Context, id uuid.UUID) (db.User, error)
+	UpdateUserStatus(ctx context.Context, arg db.UpdateUserStatusParams) (db.User, error)
+	GetUserByID(ctx context.Context, id uuid.UUID) (db.User, error)
+	ResetEmailOTPFailures(ctx context.Context, email string) error
 }
 
 func HandleListUsers(q usersQuerier) gin.HandlerFunc {
@@ -47,6 +50,8 @@ func HandleListUsers(q usersQuerier) gin.HandlerFunc {
 	}
 }
 
+// HandleUnlockUser unlocks the user and also resets their OTP failure
+// counter — admins should clear both PIN and OTP blocks in one action.
 func HandleUnlockUser(q usersQuerier) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDStr := c.Param("id")
@@ -57,6 +62,55 @@ func HandleUnlockUser(q usersQuerier) gin.HandlerFunc {
 		}
 
 		user, err := q.UnlockUser(c.Request.Context(), userID)
+		if err != nil {
+			JSONError(c, http.StatusNotFound, "not_found", "user not found")
+			return
+		}
+
+		if err := q.ResetEmailOTPFailures(c.Request.Context(), user.Email); err != nil {
+			JSONError(c, http.StatusInternalServerError, "internal_error", "failed to reset OTP failures")
+			return
+		}
+
+		JSONSuccess(c, http.StatusOK, user)
+	}
+}
+
+func HandleSuspendUser(q usersQuerier) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userIDStr := c.Param("id")
+		userID, err := uuid.Parse(userIDStr)
+		if err != nil {
+			JSONError(c, http.StatusBadRequest, "invalid_id", "invalid user ID")
+			return
+		}
+
+		user, err := q.UpdateUserStatus(c.Request.Context(), db.UpdateUserStatusParams{
+			ID:     userID,
+			Status: db.UserStatusSuspended,
+		})
+		if err != nil {
+			JSONError(c, http.StatusNotFound, "not_found", "user not found")
+			return
+		}
+
+		JSONSuccess(c, http.StatusOK, user)
+	}
+}
+
+func HandleActivateUser(q usersQuerier) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userIDStr := c.Param("id")
+		userID, err := uuid.Parse(userIDStr)
+		if err != nil {
+			JSONError(c, http.StatusBadRequest, "invalid_id", "invalid user ID")
+			return
+		}
+
+		user, err := q.UpdateUserStatus(c.Request.Context(), db.UpdateUserStatusParams{
+			ID:     userID,
+			Status: db.UserStatusActive,
+		})
 		if err != nil {
 			JSONError(c, http.StatusNotFound, "not_found", "user not found")
 			return

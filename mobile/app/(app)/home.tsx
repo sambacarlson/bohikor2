@@ -4,6 +4,7 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "@/src/providers/auth-provider";
 import { useCreateAdvanceRequest } from "@/src/hooks/use-advance";
+import { useEligibility } from "@/src/hooks/use-eligibility";
 
 export default function HomeScreen() {
   const { user, signOut } = useAuth();
@@ -11,6 +12,7 @@ export default function HomeScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const [menuVisible, setMenuVisible] = useState(false);
   const createRequest = useCreateAdvanceRequest();
+  const { data: eligibility, isLoading: eligibilityLoading, refetch: refetchEligibility, isRefetching: isRefetchingEligibility } = useEligibility();
 
   const displayName = user?.full_name || user?.email || "User";
   const email = user?.email || "";
@@ -19,6 +21,9 @@ export default function HomeScreen() {
   const phoneVerified = user?.phone_verified ?? false;
   const termsAccepted = user?.is_terms_accepted ?? false;
   const profileIncomplete = !phoneVerified || !user?.phone_number;
+
+  const advanceAmount = eligibility?.advance_amount_xaf || "10,000 XAF";
+  const formattedAmount = advanceAmount.includes("XAF") ? advanceAmount : `${advanceAmount} XAF`;
 
   const handleRequestAdvance = () => {
     if (!termsAccepted) {
@@ -120,8 +125,91 @@ export default function HomeScreen() {
             testID="request-advance-button"
           >
             <Text className="text-white text-xl font-bold">Request Advance</Text>
-            <Text className="text-primary-200 text-base mt-1">10,000 XAF</Text>
+            <Text className="text-primary-200 text-base mt-1">
+              {eligibilityLoading ? "10,000 XAF" : formattedAmount}
+            </Text>
           </TouchableOpacity>
+        </View>
+
+        <View className="px-6 mb-6">
+          <View className="bg-white rounded-xl p-5 shadow-sm">
+            <View className="flex-row items-center justify-between mb-4">
+              <Text className="text-xl font-bold text-gray-900">
+                Eligibility
+              </Text>
+              <TouchableOpacity
+                onPress={() => refetchEligibility()}
+                disabled={isRefetchingEligibility}
+              >
+                {isRefetchingEligibility ? (
+                  <ActivityIndicator size="small" color="#4C4A6E" />
+                ) : (
+                  <Ionicons name="refresh" size={20} color="#4C4A6E" />
+                )}
+              </TouchableOpacity>
+            </View>
+
+            {eligibilityLoading ? (
+              <View className="py-4 items-center">
+                <ActivityIndicator size="small" color="#4C4A6E" />
+              </View>
+            ) : eligibility ? (
+              <View className="gap-4">
+                <View className="flex-row justify-between items-center">
+                  <Text className="text-base text-gray-500">Advance amount</Text>
+                  <Text className="text-base font-semibold text-gray-900">
+                    {formattedAmount}
+                  </Text>
+                </View>
+
+                <View className="flex-row justify-between items-center">
+                  <Text className="text-base text-gray-500">Status</Text>
+                  {eligibility.eligible ? (
+                    <View className="bg-green-100 rounded-full px-3 py-1">
+                      <Text className="text-green-800 text-sm font-semibold">Eligible</Text>
+                    </View>
+                  ) : (
+                    <View className="bg-red-100 rounded-full px-3 py-1">
+                      <Text className="text-red-800 text-sm font-semibold">Not eligible</Text>
+                    </View>
+                  )}
+                </View>
+
+                <View className="flex-row justify-between items-center">
+                  <Text className="text-base text-gray-500">Remaining</Text>
+                  <Text className="text-base text-gray-900">
+                    {eligibility.daily_requests_remaining} daily / {eligibility.monthly_requests_remaining} monthly
+                  </Text>
+                </View>
+
+                <View className="flex-row justify-between items-center">
+                  <Text className="text-base text-gray-500">Request window</Text>
+                  <Text className="text-base text-gray-900">
+                    Days {eligibility.request_window.start_day}-{eligibility.request_window.end_day}
+                  </Text>
+                </View>
+
+                {eligibility.kill_switch_active && (
+                  <View className="bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                    <Text className="text-red-700 text-sm font-medium">
+                      Advances are temporarily disabled
+                    </Text>
+                  </View>
+                )}
+
+                {!eligibility.eligible && eligibility.reasons.length > 0 && (
+                  <View className="bg-gray-50 rounded-lg px-3 py-2">
+                    <Text className="text-sm font-medium text-gray-700 mb-1">Reasons:</Text>
+                    {eligibility.reasons.map((reason, i) => (
+                      <Text key={i} className="text-sm text-red-600 ml-1">
+                        • {reason}
+                      </Text>
+                    ))}
+                  </View>
+                )}
+              </View>
+            ) : null}
+          </View>
         </View>
 
         <View className="px-6 mb-6">
@@ -244,7 +332,7 @@ export default function HomeScreen() {
             </Text>
             <Text className="text-base text-gray-600 mb-4">
               You are about to request a salary advance of{" "}
-              <Text className="font-semibold text-gray-900">10,000 XAF</Text>.
+              <Text className="font-semibold text-gray-900">{formattedAmount}</Text>.
               This amount plus any applicable charges will be deducted from your
               upcoming salary.
             </Text>

@@ -72,3 +72,21 @@ export interface Admin {
   password_hash: string;
   created_at: string;
 }
+
+export interface RequestWindow {
+  start_day: number;
+  end_day: number;
+  in_window: boolean;
+}
+
+export interface EligibilityResponse {
+  eligible: boolean;
+  reasons: string[];
+  kill_switch_active: boolean;
+  request_window: RequestWindow;
+  daily_requests_remaining: number;
+  monthly_requests_remaining: number;
+  advance_amount_xaf: string;
+  phone_verified: boolean;
+  terms_accepted: boolean;
+}

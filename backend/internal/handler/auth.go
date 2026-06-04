@@ -52,6 +52,9 @@ type authQuerier interface {
 	LockUser(ctx context.Context, id uuid.UUID) (db.User, error)
 	UpdateUserPinHash(ctx context.Context, arg db.UpdateUserPinHashParams) (db.User, error)
 	CreateEvent(ctx context.Context, arg db.CreateEventParams) (db.Event, error)
+	GetEmailOTPFailure(ctx context.Context, email string) (db.EmailOtpFailure, error)
+	UpsertEmailOTPFailure(ctx context.Context, arg db.UpsertEmailOTPFailureParams) (db.EmailOtpFailure, error)
+	ResetEmailOTPFailures(ctx context.Context, email string) error
 }
 
 func NewAuthHandler(
@@ -279,6 +282,10 @@ func (h *AuthHandler) ForgotPin(c *gin.Context) {
 		return
 	}
 
+	if err := h.checkEmailOTPBlocked(c, req.Email); err != nil {
+		return
+	}
+
 	user, err := h.queries.GetUserByEmail(c.Request.Context(), req.Email)
 	if err != nil {
 		JSONError(c, http.StatusNotFound, "not_found", "No account found with this email")
@@ -324,6 +331,10 @@ func (h *AuthHandler) SendEmailOTP(c *gin.Context) {
 		return
 	}
 
+	if err := h.checkEmailOTPBlocked(c, req.Email); err != nil {
+		return
+	}
+
 	invitation, err := h.queries.GetActiveInvitationByEmail(c.Request.Context(), req.Email)
 	if err != nil {
 		JSONError(c, http.StatusNotFound, "no_invitation", "No invitation found for this email. Contact your manager.")
@@ -359,6 +370,29 @@ func (h *AuthHandler) SendEmailOTP(c *gin.Context) {
 	JSONOK(c, http.StatusOK)
 }
 
+func (h *AuthHandler) checkEmailOTPBlocked(c *gin.Context, email string) error {
+	failure, err := h.queries.GetEmailOTPFailure(c.Request.Context(), email)
+	if err != nil {
+		return nil
+	}
+
+	now := time.Now().UTC()
+
+	if failure.IsPermanentlyBlocked {
+		JSONError(c, http.StatusForbidden, "otp_permanently_blocked", "Your account has been blocked due to too many failed OTP attempts. Please contact your manager.")
+		return fmt.Errorf("permanently blocked")
+	}
+
+	if failure.BlockedUntil.Valid && failure.BlockedUntil.Time.After(now) {
+		remaining := time.Until(failure.BlockedUntil.Time).Round(time.Minute)
+		JSONError(c, http.StatusTooManyRequests, "otp_temporarily_blocked",
+			fmt.Sprintf("Too many failed OTP attempts. Try again in %s.", remaining))
+		return fmt.Errorf("temporarily blocked")
+	}
+
+	return nil
+}
+
 func (h *AuthHandler) VerifyEmailOTP(c *gin.Context) {
 	var req struct {
 		Email   string `json:"email" binding:"required,email"`
@@ -377,14 +411,17 @@ func (h *AuthHandler) VerifyEmailOTP(c *gin.Context) {
 
 	storedOTP, err := h.queries.GetEmailOTPByEmail(c.Request.Context(), req.Email)
 	if err != nil {
-		JSONError(c, http.StatusBadRequest, "invalid_otp", "Invalid or expired OTP")
+		h.recordOTPFailure(c, req.Email)
 		return
 	}
 
 	if storedOTP.Code != req.Code {
+		h.recordOTPFailure(c, req.Email)
 		JSONError(c, http.StatusBadRequest, "invalid_otp", "Invalid OTP code")
 		return
 	}
+
+	h.resetOTPFailures(c, req.Email)
 
 	if err := h.queries.DeleteEmailOTP(c.Request.Context(), req.Email); err != nil {
 		JSONError(c, http.StatusInternalServerError, "cleanup_failed", "Failed to cleanup OTP")
@@ -426,6 +463,67 @@ func (h *AuthHandler) VerifyEmailOTP(c *gin.Context) {
 	}
 
 	JSONOK(c, http.StatusOK)
+}
+
+// recordOTPFailure increments the consecutive failure counter. On 3 failures
+// the same day the user is blocked until midnight UTC; on 6 total consecutive
+// failures the user is permanently locked and admin intervention is required.
+func (h *AuthHandler) recordOTPFailure(c *gin.Context, email string) {
+	ctx := c.Request.Context()
+	now := time.Now().UTC()
+
+	var consecutive int32 = 1
+	sameDay := false
+
+	existing, err := h.queries.GetEmailOTPFailure(ctx, email)
+	if err == nil {
+		consecutive = existing.ConsecutiveFailures + 1
+		if existing.LastFailureDate.Valid {
+			existingDateStr := existing.LastFailureDate.Time.Format("2006-01-02")
+			todayStr := now.Format("2006-01-02")
+			sameDay = existingDateStr == todayStr
+		}
+	}
+
+	todayStr := now.Format("2006-01-02")
+	lastDate := pgtype.Date{}
+	if err := lastDate.Scan(todayStr); err != nil {
+		slog.Error("scan date", "error", err)
+	}
+
+	var blockedUntil sql.NullTime
+	isPermanent := false
+
+	if consecutive >= 6 {
+		isPermanent = true
+
+		user, userErr := h.queries.GetUserByEmail(ctx, email)
+		if userErr == nil {
+			if _, lockErr := h.queries.LockUser(ctx, user.ID); lockErr != nil {
+				slog.Error("lock user from OTP failures", "error", lockErr, "email", email)
+			}
+		}
+	} else if consecutive >= 3 && sameDay {
+		endOfDay := time.Date(now.Year(), now.Month(), now.Day(), 23, 59, 59, 0, time.UTC)
+		blockedUntil = sql.NullTime{Time: endOfDay, Valid: true}
+	}
+
+	_, upsertErr := h.queries.UpsertEmailOTPFailure(ctx, db.UpsertEmailOTPFailureParams{
+		Email:                email,
+		ConsecutiveFailures:  consecutive,
+		LastFailureDate:      lastDate,
+		BlockedUntil:         blockedUntil,
+		IsPermanentlyBlocked: isPermanent,
+	})
+	if upsertErr != nil {
+		slog.Error("upsert OTP failure", "error", upsertErr, "email", email)
+	}
+}
+
+func (h *AuthHandler) resetOTPFailures(c *gin.Context, email string) {
+	if err := h.queries.ResetEmailOTPFailures(c.Request.Context(), email); err != nil {
+		slog.Error("reset OTP failures", "error", err, "email", email)
+	}
 }
 
 func (h *AuthHandler) AdminLogin(c *gin.Context) {
