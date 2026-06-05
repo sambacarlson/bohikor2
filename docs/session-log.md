@@ -1,5 +1,39 @@
 # Session Log
 
+## 2026-06-05 — Epic 4: Settings engine, request controls, OTP rate limiting (Complete)
+
+### What we did
+- **Migration 000006** — `settings` table (JSONB key-value), `email_otp_failures` table, dropped old `amount_xaf` CHECK (replaced with 100-25000 range), seeded defaults
+- **sqlc queries** — `settings.sql` (ListSettings, GetSetting, UpsertSetting), `email_otp_failures.sql` (GetEmailOTPFailure, UpsertEmailOTPFailure, ResetEmailOTPFailures), extended `advance_requests.sql` (CountAdvanceRequestsByUserToday, CountSuccessfulAdvanceRequestsByUserThisMonth)
+- **Backend: Settings handler** (`settings.go`) — `GET/PUT /api/admin/settings` with value coercion (admin UI sends strings, handler converts to proper JSON primitives for JSONB storage)
+- **Backend: Advance handler rewrite** — kill switch guard, request window (Africa/Douala TZ, configurable start/end day, 0 = last day of month), daily/monthly throttling, dynamic amount from settings, `GET /advance-requests/eligibility` endpoint returning all pre-conditions + reasons, `ListUserRequests`, `HandleListAdminRequests`, webhook handler, terms acceptance
+- **Backend: Auth handler OTP rate limiting** — `checkEmailOTPBlocked` (permanent/temp block check), `recordOTPFailure` (3 same-day → block until midnight UTC, 6 total → permanent lock + user locked), `resetOTPFailures` (on successful OTP), integrated into `SendEmailOTP`, `VerifyEmailOTP`, `ForgotPin`
+- **Backend: Users handler** — `HandleSuspendUser`, `HandleActivateUser`, `HandleUnlockUser` now also clears OTP failure counter
+- **Backend: Server wiring** — settings routes, suspend/activate routes, eligibility route, timezone loading from config
+- **Admin: Settings page** (`app/(main)/settings/page.tsx`) — card-based form for all 4 sections (advance amount, kill switch, request window, rate limits) with edit-toggle UX (inputs disabled until Edit clicked, Save re-disables)
+- **Admin: Hooks** (`use-settings.ts`) — query + mutation hooks with correct payload format (`{[key]: value}`)
+- **Admin: Sidebar** — added Settings nav item
+- **Mobile: Eligibility hook** (`use-eligibility.ts`) — 30s polling query exposing `data`/`isLoading`/`refetch`/`isRefetching`
+- **Mobile: Home screen** — dynamic advance amount from API, eligibility status card (eligible badge, remaining requests, window info, kill switch banner, reasons list, refresh button)
+- **Mobile: Types** — `EligibilityResponse`, `RequestWindow` added
+- **Fixed bugs during testing** — `admin_id` type mismatch (middleware sets string, handler expected uuid.UUID), settings payload format mismatch (frontend sent `{key, value}`, backend expected `{[key]: value}`), setting key name mismatches between frontend and backend (e.g. `advance_amount` vs `advance_amount_xaf`), JSONB value type coercion (admin UI sends strings, loadSettings needs native types)
+- **render.yaml deleted** — stale, unused after move to Render dashboard config
+
+### Key decisions
+- Settings as JSONB key-value (not typed columns) — single migration for all future settings, extensible without schema changes
+- Value coercion on write (not on read) — `coerceValue()` normalizes strings to numbers/bools before JSONB stores them; `parseJSONFloat`/`parseJSONBool` in `loadSettings` handle both formats as belt-and-suspenders
+- OTP blocking: 3 consecutive failures same day → temp block until end of day UTC; 6 total consecutive → permanent lock + `LOCKUSER`; counter only resets on successful verification
+- Request window: `end_day=0` means "last day of month", evaluated dynamically per request
+- Daily/monthly limits: 0 = unlimited (skips check entirely)
+- Advance amount bounds: 100-25,000 XAF (CHECK constraint on `advance_requests.amount_xaf`)
+- Eligibility endpoint is read-only (no side effects) — mobile polls every 30s + manual refresh
+
+### Verification
+- Backend: `go test ./...` (13 suites), `golangci-lint run` (0 issues)
+- Admin: `npm run lint` + `npm run typecheck` + `npm test` (28 tests)
+- Mobile: `npm run lint` + `npm run typecheck` + `npm test` (26 tests)
+- Commit: `a7c0e70`
+
 ## 2026-06-02 — Epic 2.5: Firebase removal, own auth migration (Complete)
 
 ### What we did
