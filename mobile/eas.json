@@ -22,16 +22,7 @@
     },
     "production": {
       "autoIncrement": true,
-      "distribution": "store",
-      "env": {
-        "EXPO_PUBLIC_API_URL": "https://bohikor2-upstream.onrender.com",
-        "EXPO_PUBLIC_FIREBASE_API_KEY": "AIzaSyB4cDvbnKwB5f-ezrGbyLLLK7S8Dqnq1Sk",
-        "EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN": "bohikor2.firebaseapp.com",
-        "EXPO_PUBLIC_FIREBASE_PROJECT_ID": "bohikor2",
-        "EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET": "bohikor2.firebasestorage.app",
-        "EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID": "534673074930",
-        "EXPO_PUBLIC_FIREBASE_APP_ID": "1:534673074930:web:c7c4be74dea76d16963e6b"
-      }
+      "distribution": "store"
     }
   },
   "submit": {
