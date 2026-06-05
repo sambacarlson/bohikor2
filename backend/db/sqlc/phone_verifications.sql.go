@@ -14,7 +14,7 @@ import (
 
 const createPhoneVerification = `-- name: CreatePhoneVerification :one
 INSERT INTO phone_verifications (user_id, phone_number, amount_xaf, status)
-VALUES ($1, $2, $3, $4) RETURNING id, user_id, phone_number, amount_xaf, campay_payout_ref, status, failure_reason, created_at, updated_at
+VALUES ($1, $2, $3, $4) RETURNING id, user_id, phone_number, amount_xaf, campay_payout_ref, status, failure_reason, created_at, updated_at, ussd_code
 `
 
 type CreatePhoneVerificationParams struct {
@@ -42,12 +42,13 @@ func (q *Queries) CreatePhoneVerification(ctx context.Context, arg CreatePhoneVe
 		&i.FailureReason,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.UssdCode,
 	)
 	return i, err
 }
 
 const getActivePhoneVerificationByUser = `-- name: GetActivePhoneVerificationByUser :one
-SELECT id, user_id, phone_number, amount_xaf, campay_payout_ref, status, failure_reason, created_at, updated_at FROM phone_verifications
+SELECT id, user_id, phone_number, amount_xaf, campay_payout_ref, status, failure_reason, created_at, updated_at, ussd_code FROM phone_verifications
 WHERE user_id = $1 AND status IN ('initiated', 'pending')
 ORDER BY created_at DESC LIMIT 1
 `
@@ -65,12 +66,13 @@ func (q *Queries) GetActivePhoneVerificationByUser(ctx context.Context, userID u
 		&i.FailureReason,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.UssdCode,
 	)
 	return i, err
 }
 
 const getLatestPhoneVerificationByUser = `-- name: GetLatestPhoneVerificationByUser :one
-SELECT id, user_id, phone_number, amount_xaf, campay_payout_ref, status, failure_reason, created_at, updated_at FROM phone_verifications
+SELECT id, user_id, phone_number, amount_xaf, campay_payout_ref, status, failure_reason, created_at, updated_at, ussd_code FROM phone_verifications
 WHERE user_id = $1
 ORDER BY created_at DESC LIMIT 1
 `
@@ -88,12 +90,13 @@ func (q *Queries) GetLatestPhoneVerificationByUser(ctx context.Context, userID u
 		&i.FailureReason,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.UssdCode,
 	)
 	return i, err
 }
 
 const getPhoneVerificationByCampayRef = `-- name: GetPhoneVerificationByCampayRef :one
-SELECT id, user_id, phone_number, amount_xaf, campay_payout_ref, status, failure_reason, created_at, updated_at FROM phone_verifications WHERE campay_payout_ref = $1
+SELECT id, user_id, phone_number, amount_xaf, campay_payout_ref, status, failure_reason, created_at, updated_at, ussd_code FROM phone_verifications WHERE campay_payout_ref = $1
 `
 
 func (q *Queries) GetPhoneVerificationByCampayRef(ctx context.Context, campayPayoutRef pgtype.Text) (PhoneVerification, error) {
@@ -109,6 +112,7 @@ func (q *Queries) GetPhoneVerificationByCampayRef(ctx context.Context, campayPay
 		&i.FailureReason,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.UssdCode,
 	)
 	return i, err
 }
@@ -118,8 +122,9 @@ UPDATE phone_verifications SET
     status = $2,
     failure_reason = $3,
     campay_payout_ref = $4,
+    ussd_code = $5,
     updated_at = NOW()
-WHERE id = $1 RETURNING id, user_id, phone_number, amount_xaf, campay_payout_ref, status, failure_reason, created_at, updated_at
+WHERE id = $1 RETURNING id, user_id, phone_number, amount_xaf, campay_payout_ref, status, failure_reason, created_at, updated_at, ussd_code
 `
 
 type UpdatePhoneVerificationStatusParams struct {
@@ -127,6 +132,7 @@ type UpdatePhoneVerificationStatusParams struct {
 	Status          RequestStatus `json:"status"`
 	FailureReason   pgtype.Text   `json:"failure_reason"`
 	CampayPayoutRef pgtype.Text   `json:"campay_payout_ref"`
+	UssdCode        pgtype.Text   `json:"ussd_code"`
 }
 
 func (q *Queries) UpdatePhoneVerificationStatus(ctx context.Context, arg UpdatePhoneVerificationStatusParams) (PhoneVerification, error) {
@@ -135,6 +141,7 @@ func (q *Queries) UpdatePhoneVerificationStatus(ctx context.Context, arg UpdateP
 		arg.Status,
 		arg.FailureReason,
 		arg.CampayPayoutRef,
+		arg.UssdCode,
 	)
 	var i PhoneVerification
 	err := row.Scan(
@@ -147,6 +154,7 @@ func (q *Queries) UpdatePhoneVerificationStatus(ctx context.Context, arg UpdateP
 		&i.FailureReason,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.UssdCode,
 	)
 	return i, err
 }

@@ -39,6 +39,20 @@ type TransferResponse struct {
 	OperatorReference string  `json:"operator_reference,omitempty"`
 }
 
+type CollectRequest struct {
+	Amount            decimal.Decimal `json:"amount"`
+	Currency          string          `json:"currency"`
+	From              string          `json:"from"`
+	Description       string          `json:"description"`
+	ExternalReference string          `json:"external_reference"`
+}
+
+type CollectResponse struct {
+	Reference string `json:"reference"`
+	UssdCode  string `json:"ussd_code"`
+	Operator  string `json:"operator"`
+}
+
 type WebhookPayload struct {
 	Reference         string `json:"reference"`
 	Status            string `json:"status"`
@@ -124,6 +138,64 @@ func (c *Client) InitiateTransfer(ctx context.Context, phoneNumber string, amoun
 	}
 
 	return &tr, nil
+}
+
+func (c *Client) InitiateCollection(ctx context.Context, phoneNumber string, amount decimal.Decimal, description string, externalRef string) (*CollectResponse, error) {
+	collectReq := CollectRequest{
+		Amount:            amount,
+		Currency:          "XAF",
+		From:              phoneNumber,
+		Description:       description,
+		ExternalReference: externalRef,
+	}
+	body, err := json.Marshal(collectReq)
+	if err != nil {
+		return nil, fmt.Errorf("marshal collect request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/collect/", bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("create collect request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Token "+c.permanentToken)
+
+	slog.Info("campay collect request",
+		"phone", phoneNumber,
+		"amount", amount.String(),
+		"ref", externalRef,
+	)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("collect request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read collect response: %w", err)
+	}
+
+	slog.Info("campay collect response",
+		"status", resp.StatusCode,
+		"body", string(respBody),
+	)
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("collect failed: status=%d body=%s", resp.StatusCode, string(respBody))
+	}
+
+	var cr CollectResponse
+	if err := json.Unmarshal(respBody, &cr); err != nil {
+		return nil, fmt.Errorf("unmarshal collect response: %w", err)
+	}
+
+	if cr.Reference == "" {
+		return nil, fmt.Errorf("collect returned empty reference: body=%s", string(respBody))
+	}
+
+	return &cr, nil
 }
 
 func (c *Client) VerifyWebhook(token string) bool {

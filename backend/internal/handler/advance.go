@@ -36,6 +36,7 @@ type advanceSettingsQuerier interface {
 
 type campayTransferer interface {
 	InitiateTransfer(ctx context.Context, phoneNumber string, amount decimal.Decimal, description string, externalRef string) (*campay.TransferResponse, error)
+	InitiateCollection(ctx context.Context, phoneNumber string, amount decimal.Decimal, description string, externalRef string) (*campay.CollectResponse, error)
 }
 
 type AdvanceHandler struct {
@@ -209,6 +210,11 @@ func (h *AdvanceHandler) CreateRequest(c *gin.Context) {
 		return
 	}
 
+	if user.Status != db.UserStatusActive {
+		JSONError(c, http.StatusForbidden, "account_not_active", "account is not active")
+		return
+	}
+
 	if !user.IsTermsAccepted {
 		JSONError(c, http.StatusForbidden, "terms_not_accepted", "you must accept the terms before requesting an advance")
 		return
@@ -342,10 +348,23 @@ func (h *AdvanceHandler) CreateRequest(c *gin.Context) {
 		PayoutDurationSeconds: pgtype.Int4{Int32: elapsed, Valid: true},
 	})
 	if updateErr != nil {
-		slog.Error("update request status after transfer", "error", updateErr, "request_id", newReq.ID)
-	} else {
-		newReq = updated
+		slog.Error("update request status after transfer failed", "error", updateErr, "request_id", newReq.ID, "campay_ref", transferResp.Reference)
+
+		_, failErr := h.queries.UpdateAdvanceRequestStatus(ctx, db.UpdateAdvanceRequestStatusParams{
+			ID:                    newReq.ID,
+			Status:                db.RequestStatusFailed,
+			FailureReason:         pgtype.Text{String: "post-transfer DB update failed: " + updateErr.Error(), Valid: true},
+			CampayPayoutRef:       campayRef,
+			PayoutDurationSeconds: pgtype.Int4{Valid: false},
+		})
+		if failErr != nil {
+			slog.Error("failed to mark request as failed after transfer", "error", failErr, "request_id", newReq.ID)
+		}
+
+		JSONError(c, http.StatusInternalServerError, "internal_error", "failed to save request")
+		return
 	}
+	newReq = updated
 
 	if transferResp.Status == "PENDING" {
 		eventMeta, _ := json.Marshal(map[string]interface{}{
@@ -638,25 +657,27 @@ func (h *webhookHandler) handleAdvanceWebhook(c *gin.Context, existing db.Advanc
 		return
 	}
 
-	userID := pgtype.UUID{Bytes: existing.UserID, Valid: true}
-	eventMeta, _ := json.Marshal(map[string]interface{}{
-		"request_id":              existing.ID.String(),
-		"campay_ref":              wh.Reference,
-		"payout_duration_seconds": elapsed,
-	})
-	switch newStatus {
-	case db.RequestStatusSuccess:
-		_, _ = h.queries.CreateEvent(c.Request.Context(), db.CreateEventParams{
-			UserID:    userID,
-			EventType: "payout_success",
-			Metadata:  eventMeta,
+	if existing.Status != newStatus {
+		userID := pgtype.UUID{Bytes: existing.UserID, Valid: true}
+		eventMeta, _ := json.Marshal(map[string]interface{}{
+			"request_id":              existing.ID.String(),
+			"campay_ref":              wh.Reference,
+			"payout_duration_seconds": elapsed,
 		})
-	case db.RequestStatusFailed:
-		_, _ = h.queries.CreateEvent(c.Request.Context(), db.CreateEventParams{
-			UserID:    userID,
-			EventType: "payout_failed",
-			Metadata:  eventMeta,
-		})
+		switch newStatus {
+		case db.RequestStatusSuccess:
+			_, _ = h.queries.CreateEvent(c.Request.Context(), db.CreateEventParams{
+				UserID:    userID,
+				EventType: "payout_success",
+				Metadata:  eventMeta,
+			})
+		case db.RequestStatusFailed:
+			_, _ = h.queries.CreateEvent(c.Request.Context(), db.CreateEventParams{
+				UserID:    userID,
+				EventType: "payout_failed",
+				Metadata:  eventMeta,
+			})
+		}
 	}
 
 	JSONOK(c, http.StatusOK)
@@ -696,17 +717,21 @@ func (h *webhookHandler) handlePhoneVerificationWebhook(c *gin.Context, verif db
 	if newStatus == db.RequestStatusSuccess {
 		if _, err := h.queries.SetPhoneVerified(c.Request.Context(), verif.UserID); err != nil {
 			slog.Error("set phone verified from webhook", "error", err, "user_id", verif.UserID)
+			JSONError(c, http.StatusInternalServerError, "internal_error", "failed to set phone verified")
+			return
 		}
 
-		eventMeta, _ := json.Marshal(map[string]interface{}{
-			"verification_id": verif.ID.String(),
-			"phone_number":    verif.PhoneNumber,
-		})
-		_, _ = h.queries.CreateEvent(c.Request.Context(), db.CreateEventParams{
-			UserID:    pgtype.UUID{Bytes: verif.UserID, Valid: true},
-			EventType: "phone_verified",
-			Metadata:  eventMeta,
-		})
+		if verif.Status != newStatus {
+			eventMeta, _ := json.Marshal(map[string]interface{}{
+				"verification_id": verif.ID.String(),
+				"phone_number":    verif.PhoneNumber,
+			})
+			_, _ = h.queries.CreateEvent(c.Request.Context(), db.CreateEventParams{
+				UserID:    pgtype.UUID{Bytes: verif.UserID, Valid: true},
+				EventType: "phone_verified",
+				Metadata:  eventMeta,
+			})
+		}
 	}
 
 	JSONOK(c, http.StatusOK)

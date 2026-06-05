@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 
@@ -92,10 +93,17 @@ func (h *PhoneHandler) AddPhoneNumber(c *gin.Context) {
 		return
 	}
 
+	var amount pgtype.Numeric
+	if err := amount.Scan(h.verifAmt.String()); err != nil {
+		slog.Error("scan verification amount", "error", err)
+		JSONError(c, http.StatusInternalServerError, "internal_error", "failed to parse amount")
+		return
+	}
+
 	verif, err := h.queries.CreatePhoneVerification(c.Request.Context(), db.CreatePhoneVerificationParams{
 		UserID:      userID,
 		PhoneNumber: req.PhoneNumber,
-		AmountXaf:   pgtype.Numeric{Valid: true},
+		AmountXaf:   amount,
 		Status:      db.RequestStatusInitiated,
 	})
 	if err != nil {
@@ -105,60 +113,74 @@ func (h *PhoneHandler) AddPhoneNumber(c *gin.Context) {
 	}
 
 	description := "Bohikor2 phone number verification"
-	transferResp, transferErr := h.campay.InitiateTransfer(c.Request.Context(), req.PhoneNumber, h.verifAmt, description, verif.ID.String())
+	collectResp, collectErr := h.campay.InitiateCollection(c.Request.Context(), req.PhoneNumber, h.verifAmt, description, verif.ID.String())
 
-	if transferErr != nil {
-		slog.Error("campay phone verification transfer failed", "error", transferErr, "verification_id", verif.ID)
+	if collectErr != nil {
+		slog.Error("campay phone verification collect failed", "error", collectErr, "verification_id", verif.ID)
 
-		failureReason := transferErr.Error()
+		failureReason := collectErr.Error()
 		_, updateErr := h.queries.UpdatePhoneVerificationStatus(c.Request.Context(), db.UpdatePhoneVerificationStatusParams{
 			ID:              verif.ID,
 			Status:          db.RequestStatusFailed,
 			FailureReason:   pgtype.Text{String: failureReason, Valid: true},
 			CampayPayoutRef: pgtype.Text{Valid: false},
+			UssdCode:        pgtype.Text{Valid: false},
 		})
 		if updateErr != nil {
 			slog.Error("update verification status to failed", "error", updateErr)
 		}
 
-		JSONError(c, http.StatusBadGateway, "transfer_failed", "failed to initiate phone verification: "+failureReason)
+		JSONError(c, http.StatusBadGateway, "collect_failed", "failed to initiate phone verification: "+failureReason)
 		return
 	}
 
-	var finalStatus db.RequestStatus
-	campayRef := pgtype.Text{String: transferResp.Reference, Valid: true}
-	if transferResp.Reference == "" {
+	campayRef := pgtype.Text{String: collectResp.Reference, Valid: true}
+	if collectResp.Reference == "" {
 		campayRef = pgtype.Text{Valid: false}
-	}
-
-	switch transferResp.Status {
-	case "PENDING":
-		finalStatus = db.RequestStatusPending
-	case "SUCCESSFUL":
-		finalStatus = db.RequestStatusSuccess
-	default:
-		finalStatus = db.RequestStatusInitiated
 	}
 
 	verif, updateErr := h.queries.UpdatePhoneVerificationStatus(c.Request.Context(), db.UpdatePhoneVerificationStatusParams{
 		ID:              verif.ID,
-		Status:          finalStatus,
+		Status:          db.RequestStatusPending,
 		CampayPayoutRef: campayRef,
 		FailureReason:   pgtype.Text{Valid: false},
+		UssdCode:        pgtype.Text{String: collectResp.UssdCode, Valid: collectResp.UssdCode != ""},
 	})
 	if updateErr != nil {
-		slog.Error("update verification status after transfer", "error", updateErr)
+		slog.Error("update verification status after collect failed", "error", updateErr,
+			"verification_id", verif.ID, "campay_ref", collectResp.Reference)
+
+		_, failErr := h.queries.UpdatePhoneVerificationStatus(c.Request.Context(), db.UpdatePhoneVerificationStatusParams{
+			ID:              verif.ID,
+			Status:          db.RequestStatusFailed,
+			FailureReason:   pgtype.Text{String: "post-collect DB update failed: " + updateErr.Error(), Valid: true},
+			CampayPayoutRef: campayRef,
+			UssdCode:        pgtype.Text{String: collectResp.UssdCode, Valid: collectResp.UssdCode != ""},
+		})
+		if failErr != nil {
+			slog.Error("failed to mark verification as failed after collect", "error", failErr,
+				"verification_id", verif.ID)
+		}
+
+		JSONError(c, http.StatusInternalServerError, "internal_error", "failed to save verification")
+		return
 	}
 
-	if finalStatus == db.RequestStatusSuccess {
-		if _, err := h.queries.SetPhoneVerified(c.Request.Context(), userID); err != nil {
-			slog.Error("set phone verified", "error", err)
-		}
-	}
+	eventMeta, _ := json.Marshal(map[string]interface{}{
+		"verification_id": verif.ID,
+		"phone_number":    req.PhoneNumber,
+		"campay_ref":      collectResp.Reference,
+	})
+	_, _ = h.queries.CreateEvent(c.Request.Context(), db.CreateEventParams{
+		UserID:    pgtype.UUID{Bytes: userID, Valid: true},
+		EventType: "phone_verification_initiated",
+		Metadata:  eventMeta,
+	})
 
 	JSONSuccess(c, http.StatusOK, gin.H{
 		"verification": verif,
 		"phone_number": user.PhoneNumber,
+		"ussd_code":    collectResp.UssdCode,
 	})
 }
 
@@ -193,11 +215,15 @@ func (h *PhoneHandler) GetPhoneVerificationStatus(c *gin.Context) {
 
 	verif, err := h.queries.GetLatestPhoneVerificationByUser(c.Request.Context(), userID)
 	if err == nil {
-		result["verification"] = gin.H{
+		v := gin.H{
 			"id":         verif.ID,
 			"status":     verif.Status,
 			"created_at": verif.CreatedAt,
 		}
+		if verif.UssdCode.Valid {
+			v["ussd_code"] = verif.UssdCode.String
+		}
+		result["verification"] = v
 	}
 
 	JSONSuccess(c, http.StatusOK, result)

@@ -150,12 +150,18 @@ func (m *mockAdvanceSettingsQuerier) GetSetting(ctx context.Context, key string)
 }
 
 type mockCampayTransferer struct {
-	resp *campay.TransferResponse
-	err  error
+	transferResp *campay.TransferResponse
+	transferErr  error
+	collectResp  *campay.CollectResponse
+	collectErr   error
 }
 
 func (m *mockCampayTransferer) InitiateTransfer(ctx context.Context, phoneNumber string, amount decimal.Decimal, description string, externalRef string) (*campay.TransferResponse, error) {
-	return m.resp, m.err
+	return m.transferResp, m.transferErr
+}
+
+func (m *mockCampayTransferer) InitiateCollection(ctx context.Context, phoneNumber string, amount decimal.Decimal, description string, externalRef string) (*campay.CollectResponse, error) {
+	return m.collectResp, m.collectErr
 }
 
 func makeTestGin() *gin.Engine {
@@ -314,7 +320,7 @@ func TestCreateRequest_TransferSuccess(t *testing.T) {
 		},
 	}
 	transferMock := &mockCampayTransferer{
-		resp: &campay.TransferResponse{
+		transferResp: &campay.TransferResponse{
 			Reference: "campay-ref-success",
 			Status:    "SUCCESSFUL",
 		},
@@ -358,7 +364,7 @@ func TestCreateRequest_TransferPending(t *testing.T) {
 		},
 	}
 	transferMock := &mockCampayTransferer{
-		resp: &campay.TransferResponse{
+		transferResp: &campay.TransferResponse{
 			Reference: "campay-ref-pending",
 			Status:    "PENDING",
 		},
@@ -402,7 +408,7 @@ func TestCreateRequest_TransferFailed(t *testing.T) {
 		},
 	}
 	transferMock := &mockCampayTransferer{
-		err: errors.New("transfer failed: insufficient funds"),
+		transferErr: errors.New("transfer failed: insufficient funds"),
 	}
 	h := NewAdvanceHandler(q, transferMock, &mockAdvanceSettingsQuerier{}, time.UTC)
 
@@ -438,7 +444,7 @@ func TestCreateRequest_RequireActiveUser_ShouldBeEnforcedByMiddleware(t *testing
 		},
 	}
 	transferMock := &mockCampayTransferer{
-		resp: &campay.TransferResponse{
+		transferResp: &campay.TransferResponse{
 			Reference: "campay-ref",
 			Status:    "SUCCESSFUL",
 		},
@@ -457,8 +463,8 @@ func TestCreateRequest_RequireActiveUser_ShouldBeEnforcedByMiddleware(t *testing
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 
-	if w.Code != http.StatusCreated {
-		t.Fatalf("expected 201, got %d", w.Code)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", w.Code)
 	}
 }
 

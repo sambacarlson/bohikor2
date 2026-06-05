@@ -14,10 +14,10 @@ Users who have completed authentication (Epic 1) can now request an advance and 
 - **Mobile (New user):** Enter invited email → `GET /api/auth/check-invite` → `POST /api/auth/send-email-otp` → `POST /api/auth/verify-email-otp` (purpose=signup) → `POST /api/auth/create-pin` → home
 - **Mobile (Returning user):** Enter email + 5-digit PIN → `POST /api/auth/login` → home
 - **Mobile (Forgot PIN):** Enter email → `POST /api/auth/forgot-pin` → `POST /api/auth/verify-email-otp` (purpose=pin_reset) → `PUT /api/users/me/pin/reset` → home
-- **Phone verification:** User adds phone in settings → `POST /api/users/phone` → Campay mini-withdrawal (1 XAF) → webhook confirms → phone marked verified
+- **Phone verification:** User adds phone in settings → `POST /api/users/phone` → Campay Collect API (`POST /collect/`) debits user's phone (configurable amount) → user receives USSD code → user dials USSD code and enters PIN → webhook confirms → phone marked verified
 - **PIN rate limiting:** 3 failed attempts/hour, then 1hr cooldown, then 3 more attempts → account locked. Locked accounts unlocked by admin via `PUT /api/admin/users/:id/unlock`
 - **Tokens:** HS256 JWT access tokens (15min) + opaque refresh tokens (30 days) with rotation. Stored in expo-secure-store (mobile) or localStorage (admin).
-- **No Firebase, no SMS dependency.** Backend is sole auth authority. Phone verification uses Campay mini-withdrawal instead of SMS OTP.
+- **No Firebase, no SMS dependency.** Backend is sole auth authority. Phone verification uses Campay Collect API instead of SMS OTP.
 
 ## Request Flow (Epic 2 — Complete)
 
@@ -56,8 +56,9 @@ Users who have completed authentication (Epic 1) can now request an advance and 
 
 ## Campay Integration
 
+- **Collect API** (`POST /collect/`) — request payment from user's mobile money wallet (returns `ussd_code` user must dial, always async)
 - **Withdraw API** (`POST /withdraw/`) — send money to user's mobile money wallet (status: `SUCCESSFUL`, `FAILED`, `PENDING`)
-- **Webhook** — receive payout status updates (JWT HS256 signed, embedded as `signature` field in body)
+- **Webhook** — receive payout/collect status updates (JWT HS256 signed, embedded as `signature` field in body)
 - **JWT verification** — verify webhook signatures using `CAMPAY_WEBHOOK_SECRET` via `golang-jwt`
 - **Auth** — permanent access token (`Authorization: Token <token>`)
 - All credentials configured in backend `.env`

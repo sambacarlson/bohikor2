@@ -28,6 +28,9 @@ export default function PhoneScreen() {
   const addPhone = useAddPhone();
   const { data: verifStatus, isLoading: verifLoading } = usePhoneVerificationStatus();
 
+  const verification = verifStatus?.verification;
+  const ussdCode = verification?.ussd_code ?? null;
+
   useEffect(() => {
     if (verifStatus?.phone_verified && !prevPhoneVerified.current) {
       prevPhoneVerified.current = true;
@@ -37,6 +40,16 @@ export default function PhoneScreen() {
 
   const fullPhone = `${countryCode}${phoneNumber}`;
   const isValidPhone = (phone: string) => /^\+[1-9]\d{6,14}$/.test(phone);
+
+  const canRetry = (() => {
+    if (!verification || verifStatus?.phone_verified) return false;
+    if (verification.status === "failed") return true;
+    if (verification.status === "initiated" || verification.status === "pending") {
+      const elapsed = Date.now() - new Date(verification.created_at).getTime();
+      return elapsed >= 60000;
+    }
+    return false;
+  })();
 
   const handleSubmit = async () => {
     setError("");
@@ -70,7 +83,6 @@ export default function PhoneScreen() {
     }
   };
 
-  const verification = verifStatus?.verification;
   const verifStatusText = verification
     ? verification.status === "success"
       ? "Verified"
@@ -98,7 +110,7 @@ export default function PhoneScreen() {
           <View className="bg-white rounded-xl p-5 shadow-sm">
             <Text className="text-base text-gray-700 mb-4">
               Add your phone number to receive salary advances via mobile money.
-              A small verification amount will be sent to confirm your number.
+              A small verification amount will be deducted from your phone to confirm your number.
             </Text>
 
             <Text className="text-gray-700 mb-2 font-medium text-base">
@@ -169,9 +181,23 @@ export default function PhoneScreen() {
               </Text>
             </View>
 
+            {ussdCode && (
+              <View className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-3">
+                <Text className="text-sm font-bold text-yellow-800 mb-1">
+                  Dial the USSD code on your phone
+                </Text>
+                <Text className="text-lg font-mono text-yellow-900 mb-1">
+                  {ussdCode}
+                </Text>
+                <Text className="text-xs text-yellow-700">
+                  Enter your mobile money PIN when prompted. Verification will complete automatically.
+                </Text>
+              </View>
+            )}
+
             {verifStatusText && (
               <View className="flex-row justify-between items-center mb-3">
-                <Text className="text-base text-gray-700">Transfer</Text>
+                <Text className="text-base text-gray-700">Status</Text>
                 <View className={`rounded-full px-2 py-0.5 ${
                   verification?.status === "success"
                     ? "bg-green-100"
@@ -196,7 +222,7 @@ export default function PhoneScreen() {
               <ActivityIndicator className="mt-4" color="#7C3AED" />
             )}
 
-            {!verifStatus?.phone_verified && verification?.status !== "pending" && verification?.status !== "initiated" && (
+            {canRetry && (
               <TouchableOpacity
                 className="bg-primary-600 rounded-lg py-3 items-center mt-4"
                 onPress={() => {

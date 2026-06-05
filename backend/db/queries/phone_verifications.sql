@@ -15,6 +15,7 @@ UPDATE phone_verifications SET
     status = $2,
     failure_reason = $3,
     campay_payout_ref = $4,
+    ussd_code = $5,
     updated_at = NOW()
 WHERE id = $1 RETURNING *;
 

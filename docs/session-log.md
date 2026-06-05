@@ -34,6 +34,35 @@
 - Mobile: `npm run lint` + `npm run typecheck` + `npm test` (26 tests)
 - Commit: `a7c0e70`
 
+## 2026-06-05 — Phone verification to Collect API, payout hardening, USSD flow (In Progress → Completed)
+
+### What we did
+- **Campay client** (`client.go`): added `CollectRequest`, `CollectResponse` types, `InitiateCollection()` calling `POST /collect/`, shared `campayTransferer` interface extended with `InitiateCollection`, comprehensive unit tests for collection flow
+- **Phone handler** (`phone.go`): switched from `InitiateTransfer` to `InitiateCollection`, returns `ussd_code` in POST + GET responses, fixed `amount_xaf` to use `h.verifAmt` instead of zero, added `phone_verification_initiated` event, added fallback-to-failed on post-collect DB error
+- **Advance handler** (`advance.go`): added user status check to `CreateRequest` (forbidden if not active), added fallback-to-failed on post-transfer DB error (money already sent but DB update fails → mark failed with reason), webhook dedup (skip event when status unchanged), SetPhoneVerified failure returns 500 to trigger Campay retry
+- **Migration 000007**: added `ussd_code TEXT` column to `phone_verifications` table
+- **sqlc**: updated query to include `ussd_code`, regenerated via `go generate ./db/...`
+- **Mobile phone screen** (`settings/phone.tsx`): reads `ussd_code` from GET endpoint, displays it with dialing instructions, added `canRetry` logic (failed always retryable, initiated/pending only after 1 minute cooldown)
+- **Mobile types** (`index.ts`): `PhoneVerificationStatus.verification.ussd_code?: string`
+- **Mobile auth hook** (`use-auth.ts`): minor fix
+
+### Key decisions
+- Phone verification uses Campay Collect API (USSD debit) instead of mini-withdrawal — user dials USSD code from phone dialer, enters PIN, webhook confirms
+- Post-Campay DB failures mark the record as `failed` (with campay_ref saved) and return 500 — no permanently stuck records
+- Webhooks return 500 when critical side-effects fail (e.g. `SetPhoneVerified`) — Campay retry mechanism engages
+- USSD code stored in DB column (not ephemeral) — survives app restart, returned from both POST and GET endpoints
+- Mobile retry enabled after 1 minute for initiated/pending — gives user time to dial USSD before offering retry
+- Both collect and withdraw flows hardened: post-transfer/post-collect DB error → fallback to failed + log
+
+### Deferred
+- Kill switch inconsistency: eligibility endpoint correctly reflects `kill_switch_active: false`, but `CreateRequest` may reject with kill switch error. Both use identical `loadSettings()` → `checkKillSwitch()` path. Likely request window blocking (start_day=15, today before 15th) but user reports kill switch error. Needs investigation when resolved.
+
+### Verification
+- Backend: `go test ./...`  — passes
+- Backend: `golangci-lint run` — passes
+- Mobile: `npm run lint` + `npm run typecheck` — passes
+- Committed in this session alongside PLAN.md and docs updates
+
 ## 2026-06-02 — Epic 2.5: Firebase removal, own auth migration (Complete)
 
 ### What we did

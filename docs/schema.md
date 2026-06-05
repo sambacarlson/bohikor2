@@ -97,6 +97,7 @@ CREATE TABLE phone_verifications (
     phone_number TEXT NOT NULL,
     amount_xaf NUMERIC(10, 2) NOT NULL DEFAULT 100.00,
     campay_payout_ref TEXT UNIQUE,
+    ussd_code TEXT,
     status request_status NOT NULL DEFAULT 'initiated',
     failure_reason TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -107,7 +108,7 @@ CREATE INDEX idx_phone_verifications_user_id ON phone_verifications (user_id);
 CREATE INDEX idx_phone_verifications_status ON phone_verifications (status);
 ```
 
-> Phone verification uses Campay mini-withdrawal instead of SMS OTP. Backend calls `POST /withdraw/` to the user's phone number; when Campay webhook confirms success, the phone is marked verified. Configurable via `CAMPAY_PHONE_VERIFICATION_AMOUNT` env var (default 100 XAF).
+> Phone verification uses Campay Collect API (`POST /collect/`) instead of SMS OTP. Backend requests a payment from the user's phone number; user dials the returned USSD code and enters their PIN; when Campay webhook confirms success, the phone is marked verified. Configurable via `CAMPAY_PHONE_VERIFICATION_AMOUNT` env var (default 100 XAF).
 
 ### Refresh Tokens
 

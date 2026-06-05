@@ -123,7 +123,7 @@ export function useResetPin() {
 export function useAddPhone() {
   return useMutation({
     mutationFn: async (phone_number: string) => {
-      const { data } = await api.post("/api/users/phone", { phone_number });
+      const { data } = await api.post<{ data: PhoneVerificationStatus }>("/api/users/phone", { phone_number });
       return data.data;
     },
   });

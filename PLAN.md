@@ -115,30 +115,50 @@ Removed Firebase from all frontends. Backend is sole auth authority using JWTs, 
 - **Admin: login/page.tsx** — POST /api/auth/send-phone-otp + verify-phone-otp flow
 - **Admin: auth-guard.tsx** — checks subjectType from auth context, no Firebase
 
-## Epic 3: PIN Auth Overhaul (Current)
+## Epic 3: PIN Auth Overhaul (Complete)
 
-Replaced SMS OTP login with email + 5-digit PIN authentication. Removed phone OTP entirely; phone verification now uses Campay mini-withdrawal. Added rate limiting, account locking, and PIN reset flow.
+Replaced SMS OTP login with email + 5-digit PIN authentication. Removed phone OTP entirely; phone verification now uses Campay Collect API (USSD flow). Added rate limiting, account locking, and PIN reset flow.
 
 ### Key Changes
 
 - **Login flow:** Returning users enter email + 5-digit PIN → `POST /api/auth/login`. No more phone OTP for login.
 - **Signup flow:** New users verify email OTP (purpose=signup) → create PIN (`POST /api/auth/create-pin`). No phone step in signup.
 - **Forgot PIN:** `POST /api/auth/forgot-pin` → `POST /api/auth/verify-email-otp` (purpose=pin_reset) → `PUT /api/users/me/pin/reset`
-- **Phone verification:** Moved to settings. User adds phone → `POST /api/users/phone` → Campay mini-withdrawal (1 XAF) → webhook confirms → phone marked verified. No SMS dependency.
+- **Phone verification:** Moved to settings. User adds phone → `POST /api/users/phone` → Campay Collect API (`POST /collect/`) debits user's phone (configurable amount) → user receives USSD code → user dials USSD code and enters PIN → webhook confirms → phone marked verified. No SMS dependency.
 - **Rate limiting:** 3 failed PIN attempts/hour, then 1hr cooldown, then 3 more → account locked (`status = 'locked'`). Admin unlocks via `PUT /api/admin/users/:id/unlock`.
-- **Schema changes:** `users.phone_number` nullable, added `pin_hash`, `failed_login_attempts`, `locked_until`. Added `'locked'` to `user_status` enum. Removed `phone_otps` table. Added `phone_verifications` table (reuses `request_status` enum).
+- **Schema changes:** `users.phone_number` nullable, added `pin_hash`, `failed_login_attempts`, `locked_until`. Added `'locked'` to `user_status` enum. Removed `phone_otps` table. Added `phone_verifications` table (reuses `request_status` enum). Added `ussd_code` column.
 - **Backend changes:** New endpoints (`POST /api/auth/login`, `POST /api/auth/create-pin`, `POST /api/auth/forgot-pin`, `PUT /api/users/me/pin/reset`, `POST /api/users/phone`, `PUT /api/admin/users/:id/unlock`), PIN hashing with bcrypt, rate limiting middleware, account lock/unlock logic.
+- **Campay Collect integration:** `InitiateCollection` calling `POST /collect/`, `CollectRequest/CollectResponse` types, USSD code returned in POST + GET responses, fallback-to-failed on post-collect DB error.
 - **Removed:** SMS package (africastalking, discord), `phone_otps` table, `POST /api/auth/send-phone-otp`, `POST /api/auth/verify-phone-otp`, Firebase Auth references.
 - **Prerequisite:** User must have verified phone AND accepted terms before requesting advance.
 
-## Epic 4: Pilot Launch (Future)
+## Epic 4: Pilot Launch Controls (Complete)
 
-- Kill switch toggle
-- Request window enforcement (15th–end of month)
-- Daily/monthly throttling
-- OTP rate limiting (per-email, e.g. max 3/hour for send-email-otp)
+Settings-driven operational controls for advance requests:
+
+- Settings engine: JSONB key-value `settings` table with admin API (`GET/PUT /api/admin/settings`), value coercion for proper JSONB types
+- Kill switch toggle: global disable of all advance requests via `kill_switch_enabled` setting
+- Request window enforcement: configurable day-of-month range (15th–end of month default, 0 = last day), Africa/Douala timezone
+- Daily/monthly throttling: `daily_request_limit` and `monthly_request_limit` (0 = unlimited)
+- Dynamic advance amount from settings (`advance_amount_xaf`, 100–25,000 XAF)
+- Eligibility endpoint (`GET /api/advance-requests/eligibility`) returning all pre-conditions + reasons
+- OTP rate limiting: per-email failure tracking, temp block at 3 same-day failures, permanent block at 6 total consecutive failures
+- Admin settings page: card-based UI for all 4 sections with edit-toggle UX
+
+## Epic 5: Hardening & Production Readiness (Current)
+
+### Delivered
+- **Phone verification to Collect API**: Switched from Campay Withdraw (mini-payout) to Collect API (USSD debit flow). User dials returned USSD code from their phone's dialer instead of receiving an SMS-based payout.
+- **USS code persistence**: `ussd_code` stored in `phone_verifications` table (migration 000007) — survives app restart, returned from both POST and GET endpoints.
+- **Halfway-state resilience**: Post-Campay DB failures mark records as `failed` (with campay_ref saved) and return 500 — prevents permanently stuck records. Mobile retry enabled after 1 minute for `initiated`/`pending` states.
+- **Payout hardening**: Post-transfer DB failure marks request as `failed` with reason logged. `SetPhoneVerified` failure returns 500 to trigger Campay webhook retry. Webhook dedup (skips event when status unchanged).
+- **Defense-in-depth**: User status check added at top of `CreateRequest`.
+
+### In Progress / Deferred
+- Kill switch inconsistency: eligibility reflects state correctly but `CreateRequest` may reject — root cause unclear, deferred
 - Post-payout survey
-- Payout speed metrics
+- Payout speed metrics (P50/P90)
 - Push/email notifications
-- Events log page
+- Events log page on admin dashboard
+- Admin management page
 - E2E testing, production deployment

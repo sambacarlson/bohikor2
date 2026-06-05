@@ -63,6 +63,7 @@ export interface PhoneVerificationStatus {
     id: string;
     status: RequestStatus;
     created_at: string;
+    ussd_code?: string;
   } | null;
 }
 

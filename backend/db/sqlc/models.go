@@ -213,6 +213,7 @@ type PhoneVerification struct {
 	FailureReason   pgtype.Text    `json:"failure_reason"`
 	CreatedAt       time.Time      `json:"created_at"`
 	UpdatedAt       time.Time      `json:"updated_at"`
+	UssdCode        pgtype.Text    `json:"ussd_code"`
 }
 
 type RefreshToken struct {
