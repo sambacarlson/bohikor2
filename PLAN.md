@@ -1,164 +1,251 @@
-# PLAN.md — Bohikor2
+# PLAN.md — Bohikor
 
-## Epic 1: Authentication (Complete)
+Salary-advance platform. Employees request an advance; it is paid instantly via Campay
+mobile money. Originally a single-company mobile app; **pivoting to a multi-company web
+platform** with per-employer float and hardened payment resilience.
 
-- Backend: Firebase Admin SDK, Resend email OTP, auth middleware, role middleware, invitation CRUD, user creation, email/phone verification endpoints
-- Admin: Email/password login, invite page, users list with refresh
-- Mobile: Phone login (returning), email invite → email OTP → phone OTP (new), home screen with user info
-- Firebase: `@react-native-firebase/app` + `@react-native-firebase/auth` for native Phone Auth
+---
 
-## Epic 2: Request & Payout (Complete)
+## Shipped so far (Epics 1–5, single-tenant)
 
-**Also delivered: Client-facing web app** — phone login, request advance, transaction history, terms acceptance, and role-based access control, all within the existing Next.js admin app. Uses the same backend APIs built for mobile.
+Condensed history — see `docs/session-log.md` for detail.
 
-### Step-by-step implementation order:
+- **Epic 1 — Auth:** invitations, email OTP, user/admin accounts, event log.
+- **Epic 2 — Request & payout:** `advance_requests`, Campay Withdraw API, webhook, admin requests page.
+- **Epic 2.5 — Own auth:** removed Firebase. Backend is sole auth authority — HS256 JWT access
+  tokens (15m) + opaque rotating refresh tokens (30d), bcrypt.
+- **Epic 3 — PIN auth:** email + 5-digit PIN login, PIN rate limiting + account lock, phone
+  verification via Campay Collect (USSD) instead of SMS.
+- **Epic 4 — Pilot controls:** global JSONB `settings`, kill switch, request window, daily/monthly
+  throttling, eligibility endpoint, OTP rate limiting.
+- **Epic 5 — Hardening:** USSD persistence, post-Campay DB-failure fallbacks, webhook dedup.
 
-**1. Database — Add advance_requests table**
-- Create migration: `000003_advance_requests.up.sql` with the table DDL from `docs/schema.md`
-- Create matching `.down.sql`
-- Run `go generate ./db/...` to regenerate sqlc models
+**Known limits this pivot removes:** single company baked into the schema; global settings;
+one Campay credential set in env; **synchronous payout with the webhook as the only async
+recovery path** (a lost webhook strands a request in `pending`; a network timeout on transfer
+is marked `failed` even though funds may have moved).
 
-**2. Backend — sqlc queries**
-- Add `db/queries/advance_requests.sql`:
-  - `CreateAdvanceRequest` — insert new request
-  - `GetAdvanceRequestByID` — lookup by ID
-  - `ListAdvanceRequestsByUserID` — user's request history
-  - `ListAdvanceRequests` — admin view (all requests, ordered by created_at DESC, with pagination)
-  - `UpdateAdvanceRequestStatus` — update status + optional failure_reason + payout_duration_seconds + campay_payout_ref
+---
 
-**3. Backend — Campay client**
-- Create `internal/campay/client.go`:
-  - `NewClient(permanentToken, baseURL, webhookSecret)`
-  - `InitiateTransfer(phoneNumber, amount, description)` — POST to `POST /withdraw/`
-  - `VerifyWebhook(token)` — JWT HS256 verification using `CAMPAY_WEBHOOK_SECRET`
-- Add Campay config fields to `internal/config/config.go`: `CampayPermanentAccessToken`, `CampayWebhookSecret`, `CampayBaseURL`
-- Wire client into `server.New()`
+## Pivot — decisions (locked)
 
-**4. Backend — Handlers & routes**
-- `internal/handler/advance.go`:
-  - `POST /api/advance-requests` — create request, call Campay, return request
-  - `GET /api/advance-requests` — user's own request history (uses `RequireActiveUser` middleware)
-  - `GET /api/admin/requests` — admin view (uses `RequireAdmin` middleware)
-   - `POST /api/webhooks/campay` — public endpoint, verify JWT signature, update request status
-- Wire routes in `server/server.go`:
-  - Public: `POST /api/webhooks/campay`
-  - User-protected: `POST /api/advance-requests`, `GET /api/advance-requests`
-  - Admin-protected: `GET /api/admin/requests`
+| Area | Decision |
+| :--- | :--- |
+| **Frontend** | Fold employee + admin into **one Next.js app**, rename `admin/` → `bohikor/`. Mobile app is **frozen** (kept, not primary, not deleted). |
+| **Routing** | `/` landing+login · `/{company}` employee app · `/{company}/admin` company admin · `/platform` super-admin. |
+| **Tenancy** | Every domain table gains `company_id`. Company derived from the **JWT claim** on authed calls; API routes stay flat. |
+| **Email** | **Globally unique.** Login resolves the user's company from email, then redirects to `/{slug}`. |
+| **Onboarding** | **Platform super-admin** provisions companies + their first admin and **sets each company's balance**. Company self-signup deferred. |
+| **Campay** | **One platform Campay account** (global token + webhook secret). Each company has its own **float balance**; payouts draw from it. |
+| **Balance** | **`company_ledger`** table (immutable entries; balance = running sum). Failed payout ⇒ reversal entry. |
+| **Payout safety** | **Reconcile before deciding.** Timeouts/ambiguity ⇒ `processing`, never auto-`failed`. A reconciler polls Campay by our idempotent `external_reference`. |
+| **Retries** | **No queue.** Auto (reconciler) + user-level retry (new attempt) + admin-level retry/resolve, chosen by failure nature. |
+| **DB** | **Greenfield** — no data exists. Migration set is **rewritten** into a clean multi-tenant baseline; `company_id` is `NOT NULL` from the start. |
 
-**5. Backend — Business logic**
-- Before creating request: check user is active, has `is_terms_accepted = true`, no existing request with status `initiated` or `pending`
-- On request creation: set `status = 'initiated'`, call Campay Withdraw API (`POST /withdraw/`)
-- On Campay success (status `SUCCESSFUL`): set `status = 'success'`, record `payout_duration_seconds`
-- On Campay failure (status `FAILED`): set `status = 'failed'`, record `failure_reason`
-- Log `request_initiated`, `payout_success`, `payout_failed` events to `events` table
+---
 
-**6. Mobile — Terms screen**
-- Add `app/(app)/terms.tsx` — display terms text, checkbox, "Accept" button
-- On accept: call `POST /api/users/terms` (new endpoint) to update `is_terms_accepted`
-- Add route to tabs or as a stack screen accessible from home/profile
+## Target data model
 
-**7. Mobile — Terms acceptance endpoint (Backend)**
-- Add `PUT /api/users/terms` — update `is_terms_accepted = true`, `terms_accepted_at`, `terms_version`, `user_ip_at_consent`
-- Add sqlc query: `UpdateTermsAcceptance` (already exists in `users.sql`)
+New/changed tables (full DDL lands in `docs/schema.md` during Epic 6; sketch here):
 
-**8. Mobile — Request flow**
-- Add "Request Advance" button to `home.tsx`
-- On tap: show confirmation modal (advance + charges will be deducted per terms)
-- On confirm: call `POST /api/advance-requests`
-- On success: navigate to history screen
-- On error: show message (e.g., "Terms not accepted", "Request already in progress")
+```
+platform_admins(id, email UNIQUE, password_hash, created_at)          -- super-admins (global)
 
-**9. Mobile — Transaction history**
-- Replace empty `history.tsx` with real data: call `GET /api/advance-requests`
-- Show list of requests with status badges, date, amount
-- Auto-refresh or manual refresh button
+companies(
+  id, slug UNIQUE, name, status company_status DEFAULT 'active',       -- active|suspended
+  created_by UUID REFERENCES platform_admins(id), created_at, updated_at)
 
-**10. Admin — Requests page**
-- Add `admin/src/app/(dashboard)/requests/page.tsx`
-- Add `admin/src/hooks/use-requests.ts` hook
-- Table: user email, amount (XAF), status badge, created date, payout ref, failure reason
-- Add "Requests" to sidebar navigation
-- Add `RequestStatus` to `admin/src/types/index.ts`
+company_ledger(
+  id, company_id FK NOT NULL,
+  entry_type TEXT CHECK (entry_type IN ('topup','payout_debit','reversal','adjustment')),
+  amount_xaf NUMERIC(14,2) NOT NULL,   -- signed: topup/reversal +, debit -
+  advance_request_id UUID NULL,        -- set for debit/reversal
+  created_by UUID NULL,                -- platform_admin for topup/adjustment
+  note TEXT, created_at)
+-- balance(company_id) = SUM(amount_xaf)
 
-**11. Tests**
-- Backend: unit tests for Campay client (mock HTTP), advance request handler, webhook handler
-- Mobile: verify terms acceptance flow, request creation, history rendering
-- Admin: requests page renders, status badges correct
+admins            += company_id FK NOT NULL           -- company admins, scoped
+users             += company_id FK NOT NULL           -- email stays globally UNIQUE
+invitations       += company_id FK NOT NULL
+settings           : PK becomes (company_id, key)     -- per-company; seeded on company create
+events            += company_id (nullable for platform events)
+phone_verifications += company_id FK NOT NULL
+advance_requests  += company_id FK NOT NULL
+                   + resilience cols: attempt_count INT DEFAULT 0,
+                     last_reconciled_at TIMESTAMPTZ, next_retry_at TIMESTAMPTZ,
+                     needs_admin_review BOOLEAN DEFAULT FALSE
+refresh_tokens     : subject_type CHECK now allows ('user','admin','platform_admin')
+```
 
-## Epic 2.5: Firebase Removal — Own Auth (Complete)
+**Enums**
+- `company_status`: `active | suspended`
+- `request_status`: `initiated | processing | pending | success | failed`
+  - add **`processing`** = Campay called, outcome unconfirmed (timeout/ambiguous). Never guessed.
 
-Removed Firebase from all frontends. Backend is sole auth authority using JWTs, bcrypt, and SMS OTPs.
+**Advance request state machine**
+```
+initiated ──create row + reserve float (ledger debit)──▶ call Campay
+   │ sync SUCCESSFUL ─▶ success
+   │ sync PENDING    ─▶ pending      (reconciler + webhook confirm)
+   │ sync FAILED     ─▶ failed       (post ledger reversal)
+   │ timeout/network ─▶ processing   (reconciler resolves; NEVER failed here)
+webhook / reconciler: pending|processing ─▶ success | failed(+reversal)
+after N attempts & age ─▶ needs_admin_review = true
+```
 
-- **Backend: authjwt package** — `internal/authjwt/service.go` (TokenService interface + HS256 impl), `token_util.go`, `service_test.go`
-- **Backend: authpassword package** — `internal/authpassword/hasher.go` (Hasher interface), `bcrypt.go`, `hasher_test.go`
-- **Backend: sms package** — `internal/sms/sender.go` (Sender interface)
-- **Backend: sms/africastalking** — `client.go` (impl with HTTPDoer), `client_test.go`
-- **Backend: sms/discord** — `client.go` (webhook-based Sender impl), `client_test.go`; sends OTP as Discord embed
-- **Backend: Config** — `SMS_PROVIDER` env var (`discord` or `africastalking`), `DISCORD_WEBHOOK_URL`, `DISCORD_BOT_USERNAME`
-- **Backend: server.go** — switch on `SMS_PROVIDER` config to wire discord or africastalking Sender
-- **Backend: Migration 000004** — drops `firebase_uid` from `users` and `admins`, adds `password_hash` to `admins`, creates `phone_otps` and `refresh_tokens` tables with indexes
-- **Backend: sqlc queries** — rewrote users.sql, admins.sql; new phone_otps.sql, refresh_tokens.sql
-- **Backend: Auth handler** — SendPhoneOTP, VerifyPhoneOTP, AdminLogin, RefreshToken, Logout, CheckInvitation, SendEmailOTP, VerifyEmailOTP
-- **Backend: JWTAuth middleware** — RequireAdmin/RequireActiveUser using subject_id/subject_type from JWT claims
-- **Backend: Routes** — handleUserMe/handleAdminMe using UUID from JWT claims
-- **Backend: CLI tool** — `cmd/create-admin/main.go` accepts --email and --password
-- **Mobile: lib/auth.ts** — token storage via expo-secure-store (getAccessToken, getRefreshToken, setTokens, clearTokens)
-- **Mobile: lib/api.ts** — axios interceptor attaches Bearer token, 401 response interceptor does token refresh with rotation
-- **Mobile: providers/auth-provider.tsx** — token-based auth context, exposes {user, loading, signOut, refreshUser}
-- **Mobile: Login & verify screens** — backend OTP flow, calls refreshUser after setTokens
-- **Mobile: Firebase fully removed** — uninstalled @react-native-firebase/*, firebase; deleted google-services.json, GoogleService-Info.plist, native plugin files
-- **Admin: Firebase fully removed** — deleted lib/firebase.ts, uninstalled firebase package
-- **Admin: lib/auth.ts** — localStorage token storage (getAccessToken, getRefreshToken, setTokens, clearTokens)
-- **Admin: lib/api.ts** — axios interceptor with Bearer token + refresh rotation; redirects to /login on 401
-- **Admin: auth-provider.tsx** — token-based auth context; tries /api/admin/me then /api/users/me; exposes {user, admin, subjectType, loading, signOut, refreshSubject}
-- **Admin: login/admin/page.tsx** — POST /api/auth/admin/login with email/password
-- **Admin: login/page.tsx** — POST /api/auth/send-phone-otp + verify-phone-otp flow
-- **Admin: auth-guard.tsx** — checks subjectType from auth context, no Firebase
+**Idempotency:** `advance_requests.id` is the Campay `external_reference`. The reconciler only
+**reads** status (never re-POSTs) ⇒ no double pay. A user/admin retry creates a **new** request
+(new id ⇒ new external_reference), a deliberate fresh payout.
 
-## Epic 3: PIN Auth Overhaul (Complete)
+---
 
-Replaced SMS OTP login with email + 5-digit PIN authentication. Removed phone OTP entirely; phone verification now uses Campay Collect API (USSD flow). Added rate limiting, account locking, and PIN reset flow.
+## JWT & scoping
 
-### Key Changes
+- Access-token claims add `company_id` (empty for `platform_admin`). `role` ∈ `user | admin | platform_admin`.
+- `JWTAuth` middleware sets `subject_id`, `subject_type`, `company_id` in the Gin context.
+- New `RequirePlatformAdmin`; `RequireAdmin`/`RequireActiveUser` additionally load the record and
+  reject if `company.status = suspended`.
+- **Every** sqlc query for tenant data takes a `company_id` param sourced from the claim. No handler
+  trusts a company id from the request body/URL for authed reads/writes.
 
-- **Login flow:** Returning users enter email + 5-digit PIN → `POST /api/auth/login`. No more phone OTP for login.
-- **Signup flow:** New users verify email OTP (purpose=signup) → create PIN (`POST /api/auth/create-pin`). No phone step in signup.
-- **Forgot PIN:** `POST /api/auth/forgot-pin` → `POST /api/auth/verify-email-otp` (purpose=pin_reset) → `PUT /api/users/me/pin/reset`
-- **Phone verification:** Moved to settings. User adds phone → `POST /api/users/phone` → Campay Collect API (`POST /collect/`) debits user's phone (configurable amount) → user receives USSD code → user dials USSD code and enters PIN → webhook confirms → phone marked verified. No SMS dependency.
-- **Rate limiting:** 3 failed PIN attempts/hour, then 1hr cooldown, then 3 more → account locked (`status = 'locked'`). Admin unlocks via `PUT /api/admin/users/:id/unlock`.
-- **Schema changes:** `users.phone_number` nullable, added `pin_hash`, `failed_login_attempts`, `locked_until`. Added `'locked'` to `user_status` enum. Removed `phone_otps` table. Added `phone_verifications` table (reuses `request_status` enum). Added `ussd_code` column.
-- **Backend changes:** New endpoints (`POST /api/auth/login`, `POST /api/auth/create-pin`, `POST /api/auth/forgot-pin`, `PUT /api/users/me/pin/reset`, `POST /api/users/phone`, `PUT /api/admin/users/:id/unlock`), PIN hashing with bcrypt, rate limiting middleware, account lock/unlock logic.
-- **Campay Collect integration:** `InitiateCollection` calling `POST /collect/`, `CollectRequest/CollectResponse` types, USSD code returned in POST + GET responses, fallback-to-failed on post-collect DB error.
-- **Removed:** SMS package (africastalking, discord), `phone_otps` table, `POST /api/auth/send-phone-otp`, `POST /api/auth/verify-phone-otp`, Firebase Auth references.
-- **Prerequisite:** User must have verified phone AND accepted terms before requesting advance.
+---
 
-## Epic 4: Pilot Launch Controls (Complete)
+# Epic 6 — Multi-tenant foundation (backend)
 
-Settings-driven operational controls for advance requests:
+**Goal:** the API is company-aware end to end; super-admin can create companies, first admins, and
+set balances; settings are per-company.
 
-- Settings engine: JSONB key-value `settings` table with admin API (`GET/PUT /api/admin/settings`), value coercion for proper JSONB types
-- Kill switch toggle: global disable of all advance requests via `kill_switch_enabled` setting
-- Request window enforcement: configurable day-of-month range (15th–end of month default, 0 = last day), Africa/Douala timezone
-- Daily/monthly throttling: `daily_request_limit` and `monthly_request_limit` (0 = unlimited)
-- Dynamic advance amount from settings (`advance_amount_xaf`, 100–25,000 XAF)
-- Eligibility endpoint (`GET /api/advance-requests/eligibility`) returning all pre-conditions + reasons
-- OTP rate limiting: per-email failure tracking, temp block at 3 same-day failures, permanent block at 6 total consecutive failures
-- Admin settings page: card-based UI for all 4 sections with edit-toggle UX
+1. **Rewrite migrations → clean baseline** (`000001_init.up/down.sql`): all tables above, enums,
+   indexes (`idx_<table>_company_id`, `idx_company_ledger_company_id`, keep existing). Delete stale
+   numbered migrations (authorized — greenfield). Update `docs/schema.md` as source of truth.
+2. **sqlc queries** — add/rewrite in `db/queries/`:
+   - `companies.sql` — Create, GetBySlug, GetByID, List, UpdateStatus.
+   - `platform_admins.sql` — GetByEmail, GetByID, Create.
+   - `company_ledger.sql` — CreateLedgerEntry, GetCompanyBalance, ListLedgerByCompany.
+   - Thread `company_id` through `users.sql`, `admins.sql`, `invitations.sql`,
+     `advance_requests.sql`, `phone_verifications.sql`, `events.sql`.
+   - `settings.sql` — composite `(company_id, key)`; ListSettingsByCompany, UpsertSetting, seed helper.
+   - `refresh_tokens.sql` — allow `platform_admin` subject_type.
+   - Run `go generate ./db/...`.
+3. **Config** (`internal/config`): keep single Campay creds. Add nothing per-company (platform account).
+4. **Auth/JWT** (`internal/authjwt`, `internal/middleware`): add `company_id` claim; `RequirePlatformAdmin`;
+   company + company-status enforcement in `RequireAdmin`/`RequireActiveUser`.
+5. **Platform handler** (`internal/handler/platform.go`) under `/api/platform/*` (RequirePlatformAdmin):
+   - `POST /companies` — create company (slug+name), seed default settings, return it.
+   - `POST /companies/:id/admins` — create the company's first admin (email+temp password / invite).
+   - `POST /companies/:id/ledger/topup` — post a `topup` ledger entry (super-admin sets balance).
+   - `GET /companies`, `GET /companies/:id` — list/detail incl. computed balance.
+   - `PUT /companies/:id/status` — suspend/activate a company.
+6. **Auth handler** (`internal/handler/auth.go`): `Login` resolves company from email (global unique),
+   verifies PIN + user active + company active, returns tokens **and** `company_slug` for redirect.
+   Add `POST /api/auth/platform/login` (super-admin). Company admin login unchanged but scoped.
+7. **Company scoping in existing handlers**: invitations, users, settings, advance, phone, events all
+   filter/write by `company_id` from the claim.
+8. **CLI** `cmd/create-platform-admin/main.go` (mirrors create-admin) to bootstrap the first super-admin.
+9. **Tests:** company isolation (user A can't read company B), platform provisioning, per-company
+   settings, login→company resolution, company-suspended blocks. `go test ./...` + `golangci-lint`.
 
-## Epic 5: Hardening & Production Readiness (Current)
+---
 
-### Delivered
-- **Phone verification to Collect API**: Switched from Campay Withdraw (mini-payout) to Collect API (USSD debit flow). User dials returned USSD code from their phone's dialer instead of receiving an SMS-based payout.
-- **USS code persistence**: `ussd_code` stored in `phone_verifications` table (migration 000007) — survives app restart, returned from both POST and GET endpoints.
-- **Halfway-state resilience**: Post-Campay DB failures mark records as `failed` (with campay_ref saved) and return 500 — prevents permanently stuck records. Mobile retry enabled after 1 minute for `initiated`/`pending` states.
-- **Payout hardening**: Post-transfer DB failure marks request as `failed` with reason logged. `SetPhoneVerified` failure returns 500 to trigger Campay webhook retry. Webhook dedup (skips event when status unchanged).
-- **Defense-in-depth**: User status check added at top of `CreateRequest`.
+# Epic 7 — Payout reliability & float (backend)
 
-### In Progress / Deferred
-- Kill switch inconsistency: eligibility reflects state correctly but `CreateRequest` may reject — root cause unclear, deferred
-- Post-payout survey
-- Payout speed metrics (P50/P90)
-- Push/email notifications
-- Events log page on admin dashboard
-- Admin management page
-- E2E testing, production deployment
+**Goal:** no transaction can get permanently stuck; float is enforced and auditable; failures are
+recoverable by the right actor.
+
+1. **Ledger-gated payout** in `advance.go CreateRequest`:
+   - New eligibility check: **company float ≥ advance amount** (reason `insufficient_employer_float`).
+   - In one DB tx: create request (`initiated`) + post `payout_debit` ledger entry (reserve float).
+   - Call Campay. Map outcome: SUCCESSFUL→`success`, PENDING→`pending`, FAILED→`failed`(+`reversal`),
+     **timeout/transport error→`processing`** (set `next_retry_at`), **not** `failed`.
+2. **Campay status lookup** (`internal/campay/client.go`): add `GetTransactionStatus(externalRef)` →
+   `GET /transaction/{ref}/`. **Research step:** confirm Campay's status endpoint keys on our
+   `external_reference` (vs Campay reference) and its idempotency semantics; adjust the ref we persist
+   accordingly. Add unit tests (mock HTTP).
+3. **Reconciler** (`internal/reconciler/`): background goroutine started in `server.New`, ticker every
+   ~30s. `ListReconcilable` = requests in (`initiated` aged, `processing`, `pending`) with
+   `next_retry_at <= now`. For each: poll Campay status → transition; on `failed` post ledger reversal;
+   bump `attempt_count`, set `last_reconciled_at` + exponential `next_retry_at`. After max attempts &
+   age ⇒ `needs_admin_review = true`. Same path reused by phone_verifications.
+4. **Webhook** (`advance.go`): unchanged trigger, but transitions now go through the shared state-machine
+   helper so ledger reversal + dedup are consistent with the reconciler.
+5. **User-level retry** `POST /api/advance-requests/:id/retry`: allowed only when the request is
+   terminal `failed` and no non-terminal request exists ⇒ creates a **new** request (fresh
+   external_reference). Guarded by all normal eligibility + float checks.
+6. **Admin-level actions** under `/api/admin/requests/:id/*` (company admin):
+   - `POST /reconcile` — force an immediate Campay status poll.
+   - `POST /resolve` — mark resolved after manual Campay-dashboard check (audited).
+   - `POST /reissue` — deliberately re-initiate a payout (new external_reference) after confirming no
+     funds moved. Posts fresh debit; audited.
+   - Manual `adjustment` ledger entry (platform-admin only) for corrections.
+7. **Eligibility endpoint**: add float + company-status reasons so mobile/web reflect them.
+8. **Tests:** state-machine transitions (esp. timeout→processing→resolved), ledger debit/reversal math,
+   reconciler backoff + needs-review flag, retry guards (no double active request, no double pay).
+
+---
+
+# Epic 8 — Unified web app (`bohikor/`)
+
+**Goal:** one responsive Next.js app: employee portal (mobile-first, desktop-enhanced), company admin,
+platform super-admin.
+
+1. **Rename & restructure** `admin/` → `bohikor/`. Route tree:
+   ```
+   src/app/
+     page.tsx                     landing + login (resolve company by email → redirect /{slug})
+     platform/                    super-admin: companies list, create company + first admin,
+                                  set/top-up balance, suspend, cross-company request health
+     [company]/
+       layout.tsx                 company context (validate slug vs JWT, theme, guards)
+       page.tsx                   employee home: eligibility, request advance, balance-aware states
+       login/ signup/ verify/ create-pin/ forgot-pin/ reset-pin/
+       history/                   requests + statuses + user retry action
+       account/                   phone verify, change PIN, terms
+       admin/                     company admin: dashboard, users, invite, requests
+                                  (+reconcile/resolve/reissue), settings, events, balance/ledger
+   ```
+2. **Shared data layer:** extend `lib/api.ts` (already has refresh rotation); TanStack Query hooks for
+   companies, ledger/balance, requests (+retry/admin actions), eligibility, settings, users, invites,
+   events. Auth provider gains `platform_admin` subject + company context.
+3. **Employee flows:** port screen-for-screen from `mobile/app/**` (login, signup, verify-email,
+   create-pin, forgot/reset-pin, home, history, terms, phone). Mobile-first layout; at ≥ md, widen
+   (sidebar / two-column) for desktop.
+4. **Company admin:** existing admin pages, now company-scoped, plus **balance/ledger view** and the
+   **retry/resolve/reissue** actions + `needs_admin_review` queue.
+5. **Platform console:** companies CRUD, create first admin, **set/top-up balance**, suspend/activate,
+   a reconciliation/health overview.
+6. **Invitation emails** link to `/{company}/signup?email=…` (slug embedded).
+7. **Tests:** Jest + RTL for employee flows, admin retry actions, platform provisioning + balance,
+   guards (wrong-company slug, suspended company). `npm run lint && typecheck && test`.
+
+---
+
+# Epic 9 — Freeze mobile, docs, deploy
+
+1. **Freeze `mobile/`:** add a note (README/AGENTS) that it is frozen and no longer primary; keep tests
+   green but no new features. Do **not** delete.
+2. **Docs:** rewrite `docs/schema.md` (multi-tenant DDL, ledger, resilience columns, state machine),
+   `docs/brief.md` (multi-company model, float, retries), update `AGENTS.md` (new structure, `bohikor/`,
+   `/platform`, reconciler, ledger). Append a session-log entry.
+3. **Deploy:** single Next.js app path-routing (`/`, `/{company}`, `/platform`); backend env unchanged
+   (one Campay account); ensure reconciler goroutine is covered by graceful shutdown; `docker build`
+   check per the AGENTS pre-push checklist; migrations run in CI pre-deploy.
+
+---
+
+## Sequencing & risks
+
+- **Order:** Epic 6 → 7 → 8 → 9. 6 unblocks everything; 7 depends on 6's ledger/schema; 8 consumes 6+7
+  APIs; 9 closes out.
+- **Biggest risks:** (1) Campay status-lookup/idempotency semantics — verify early in Epic 7 before
+  finalizing the `external_reference` contract. (2) Float debit/reversal correctness under concurrent
+  requests — cover with tx + tests. (3) Reconciler + graceful shutdown (no double-processing on restart)
+  — idempotent, read-only polling keeps this safe.
+- **Open item to confirm during Epic 6:** whether company admins may *request* top-ups (vs view-only
+  balance). Assumed **view-only**; super-admin is sole funder for the pilot.
+
+## Rules (unchanged)
+
+- **NEVER auto-commit.** Wait for explicit instruction.
+- All `UPDATE` queries set `updated_at = NOW()`. Migrations numbered, no `IF [NOT] EXISTS`.
+- Lint + typecheck + tests must pass for every changed workspace before a change is "done".
+- Never commit secrets; per-company data always filtered by `company_id` from the JWT claim.
