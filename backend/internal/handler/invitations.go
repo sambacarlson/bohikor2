@@ -5,17 +5,23 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 
 	db "github.com/Iknite-Space/bohikor2/db/sqlc"
 )
 
 type invitationsQuerier interface {
-	ListInvitations(ctx context.Context) ([]db.Invitation, error)
+	ListInvitationsByCompany(ctx context.Context, companyID uuid.UUID) ([]db.Invitation, error)
 }
 
 func HandleListInvitations(q invitationsQuerier) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		invitations, err := q.ListInvitations(c.Request.Context())
+		companyID, ok := companyIDFromContext(c)
+		if !ok {
+			return
+		}
+
+		invitations, err := q.ListInvitationsByCompany(c.Request.Context(), companyID)
 		if err != nil {
 			JSONError(c, http.StatusInternalServerError, "internal_error", "failed to list invitations")
 			return

@@ -101,6 +101,7 @@ func (h *PhoneHandler) AddPhoneNumber(c *gin.Context) {
 	}
 
 	verif, err := h.queries.CreatePhoneVerification(c.Request.Context(), db.CreatePhoneVerificationParams{
+		CompanyID:   user.CompanyID,
 		UserID:      userID,
 		PhoneNumber: req.PhoneNumber,
 		AmountXaf:   amount,
@@ -172,6 +173,7 @@ func (h *PhoneHandler) AddPhoneNumber(c *gin.Context) {
 		"campay_ref":      collectResp.Reference,
 	})
 	_, _ = h.queries.CreateEvent(c.Request.Context(), db.CreateEventParams{
+		CompanyID: pgtype.UUID{Bytes: user.CompanyID, Valid: true},
 		UserID:    pgtype.UUID{Bytes: userID, Valid: true},
 		EventType: "phone_verification_initiated",
 		Metadata:  eventMeta,

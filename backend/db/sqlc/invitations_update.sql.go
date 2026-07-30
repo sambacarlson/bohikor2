@@ -12,7 +12,7 @@ import (
 )
 
 const updateInvitationStatus = `-- name: UpdateInvitationStatus :one
-UPDATE invitations SET status = $1, updated_at = NOW() WHERE id = $2 RETURNING id, email, status, invited_by, sent_at, accepted_at, updated_at
+UPDATE invitations SET status = $1, updated_at = NOW() WHERE id = $2 RETURNING id, company_id, email, status, invited_by, sent_at, accepted_at, updated_at
 `
 
 type UpdateInvitationStatusParams struct {
@@ -25,6 +25,7 @@ func (q *Queries) UpdateInvitationStatus(ctx context.Context, arg UpdateInvitati
 	var i Invitation
 	err := row.Scan(
 		&i.ID,
+		&i.CompanyID,
 		&i.Email,
 		&i.Status,
 		&i.InvitedBy,

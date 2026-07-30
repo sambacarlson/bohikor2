@@ -30,8 +30,7 @@ type advanceQuerier interface {
 }
 
 type advanceSettingsQuerier interface {
-	GetSetting(ctx context.Context, key string) (db.Setting, error)
-	ListSettings(ctx context.Context) ([]db.Setting, error)
+	ListSettingsByCompany(ctx context.Context, companyID uuid.UUID) ([]db.Setting, error)
 }
 
 type campayTransferer interface {
@@ -98,8 +97,8 @@ func parseJSONBool(raw []byte) (bool, bool) {
 
 // loadSettings reads all settings from the DB. Missing or unparseable keys
 // fall back to defaults (advanceAmount=10000, limits=0/unlimited).
-func (h *AdvanceHandler) loadSettings(ctx context.Context) (*parsedSettings, error) {
-	all, err := h.settings.ListSettings(ctx)
+func (h *AdvanceHandler) loadSettings(ctx context.Context, companyID uuid.UUID) (*parsedSettings, error) {
+	all, err := h.settings.ListSettingsByCompany(ctx, companyID)
 	if err != nil {
 		return nil, err
 	}
@@ -231,7 +230,7 @@ func (h *AdvanceHandler) CreateRequest(c *gin.Context) {
 		return
 	}
 
-	ps, err := h.loadSettings(ctx)
+	ps, err := h.loadSettings(ctx, user.CompanyID)
 	if err != nil {
 		slog.Error("load settings", "error", err)
 		JSONError(c, http.StatusInternalServerError, "internal_error", "failed to load settings")
@@ -274,6 +273,7 @@ func (h *AdvanceHandler) CreateRequest(c *gin.Context) {
 	}
 
 	newReq, err := h.queries.CreateAdvanceRequest(ctx, db.CreateAdvanceRequestParams{
+		CompanyID: user.CompanyID,
 		UserID:    userID,
 		AmountXaf: amount,
 		Status:    db.RequestStatusInitiated,
@@ -289,6 +289,7 @@ func (h *AdvanceHandler) CreateRequest(c *gin.Context) {
 		"amount_xaf": ps.advanceAmount.String(),
 	})
 	_, _ = h.queries.CreateEvent(ctx, db.CreateEventParams{
+		CompanyID: pgtype.UUID{Bytes: user.CompanyID, Valid: true},
 		UserID:    pgtype.UUID{Bytes: userID, Valid: true},
 		EventType: "request_initiated",
 		Metadata:  metadata,
@@ -317,6 +318,7 @@ func (h *AdvanceHandler) CreateRequest(c *gin.Context) {
 			"reason":     failureReason,
 		})
 		_, _ = h.queries.CreateEvent(ctx, db.CreateEventParams{
+			CompanyID: pgtype.UUID{Bytes: user.CompanyID, Valid: true},
 			UserID:    pgtype.UUID{Bytes: userID, Valid: true},
 			EventType: "payout_failed",
 			Metadata:  failMeta,
@@ -372,6 +374,7 @@ func (h *AdvanceHandler) CreateRequest(c *gin.Context) {
 			"campay_ref": transferResp.Reference,
 		})
 		_, _ = h.queries.CreateEvent(ctx, db.CreateEventParams{
+			CompanyID: pgtype.UUID{Bytes: user.CompanyID, Valid: true},
 			UserID:    pgtype.UUID{Bytes: userID, Valid: true},
 			EventType: "payout_pending",
 			Metadata:  eventMeta,
@@ -383,6 +386,7 @@ func (h *AdvanceHandler) CreateRequest(c *gin.Context) {
 			"payout_duration_seconds": elapsed,
 		})
 		_, _ = h.queries.CreateEvent(ctx, db.CreateEventParams{
+			CompanyID: pgtype.UUID{Bytes: user.CompanyID, Valid: true},
 			UserID:    pgtype.UUID{Bytes: userID, Valid: true},
 			EventType: "payout_success",
 			Metadata:  eventMeta,
@@ -414,7 +418,7 @@ func (h *AdvanceHandler) GetEligibility(c *gin.Context) {
 		return
 	}
 
-	ps, err := h.loadSettings(ctx)
+	ps, err := h.loadSettings(ctx, user.CompanyID)
 	if err != nil {
 		slog.Error("load settings for eligibility", "error", err)
 		JSONError(c, http.StatusInternalServerError, "internal_error", "failed to load settings")
@@ -523,17 +527,23 @@ func (h *AdvanceHandler) ListUserRequests(c *gin.Context) {
 }
 
 type adminRequestsQuerier interface {
-	ListAdvanceRequestsWithUser(ctx context.Context, arg db.ListAdvanceRequestsWithUserParams) ([]db.ListAdvanceRequestsWithUserRow, error)
+	ListAdvanceRequestsWithUserByCompany(ctx context.Context, arg db.ListAdvanceRequestsWithUserByCompanyParams) ([]db.ListAdvanceRequestsWithUserByCompanyRow, error)
 }
 
 func HandleListAdminRequests(q adminRequestsQuerier) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		companyID, ok := companyIDFromContext(c)
+		if !ok {
+			return
+		}
+
 		page := 1
 		perPage := 20
 
-		requests, err := q.ListAdvanceRequestsWithUser(c.Request.Context(), db.ListAdvanceRequestsWithUserParams{
-			Limit:  int32(perPage),
-			Offset: int32((page - 1) * perPage),
+		requests, err := q.ListAdvanceRequestsWithUserByCompany(c.Request.Context(), db.ListAdvanceRequestsWithUserByCompanyParams{
+			CompanyID: companyID,
+			Limit:     int32(perPage),
+			Offset:    int32((page - 1) * perPage),
 		})
 		if err != nil {
 			slog.Error("list admin requests", "error", err)
@@ -542,7 +552,7 @@ func HandleListAdminRequests(q adminRequestsQuerier) gin.HandlerFunc {
 		}
 
 		if requests == nil {
-			requests = []db.ListAdvanceRequestsWithUserRow{}
+			requests = []db.ListAdvanceRequestsWithUserByCompanyRow{}
 		}
 
 		JSONSuccess(c, http.StatusOK, requests)
@@ -658,6 +668,7 @@ func (h *webhookHandler) handleAdvanceWebhook(c *gin.Context, existing db.Advanc
 	}
 
 	if existing.Status != newStatus {
+		companyID := pgtype.UUID{Bytes: existing.CompanyID, Valid: true}
 		userID := pgtype.UUID{Bytes: existing.UserID, Valid: true}
 		eventMeta, _ := json.Marshal(map[string]interface{}{
 			"request_id":              existing.ID.String(),
@@ -667,12 +678,14 @@ func (h *webhookHandler) handleAdvanceWebhook(c *gin.Context, existing db.Advanc
 		switch newStatus {
 		case db.RequestStatusSuccess:
 			_, _ = h.queries.CreateEvent(c.Request.Context(), db.CreateEventParams{
+				CompanyID: companyID,
 				UserID:    userID,
 				EventType: "payout_success",
 				Metadata:  eventMeta,
 			})
 		case db.RequestStatusFailed:
 			_, _ = h.queries.CreateEvent(c.Request.Context(), db.CreateEventParams{
+				CompanyID: companyID,
 				UserID:    userID,
 				EventType: "payout_failed",
 				Metadata:  eventMeta,
@@ -727,6 +740,7 @@ func (h *webhookHandler) handlePhoneVerificationWebhook(c *gin.Context, verif db
 				"phone_number":    verif.PhoneNumber,
 			})
 			_, _ = h.queries.CreateEvent(c.Request.Context(), db.CreateEventParams{
+				CompanyID: pgtype.UUID{Bytes: verif.CompanyID, Valid: true},
 				UserID:    pgtype.UUID{Bytes: verif.UserID, Valid: true},
 				EventType: "phone_verified",
 				Metadata:  eventMeta,

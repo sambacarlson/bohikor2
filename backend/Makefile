@@ -1,4 +1,4 @@
-.PHONY: run build docker-build lint test generate migrate-up migrate-down migrate-create clean
+.PHONY: run build docker-build lint test test-cover generate migrate-up migrate-down migrate-create clean
 
 # Variables
 BINARY_NAME=bohikor2
@@ -25,6 +25,24 @@ lint:
 # Run tests
 test:
 	go test -v -race -coverprofile=coverage.out ./...
+
+# Business-logic packages we hold to a coverage bar. Excludes:
+#   db/sqlc         -> auto-generated query wrappers (don't test generated code)
+#   cmd/*           -> thin main() entrypoints
+#   config/         -> env loading
+#   repository/     -> pgx pool wrapper (needs a live DB, no logic)
+#   database/       -> migration runner (covered by opt-in MIGRATION_TEST_DB_URL)
+COVER_PKGS=github.com/Iknite-Space/bohikor2/internal/handler,github.com/Iknite-Space/bohikor2/internal/server,github.com/Iknite-Space/bohikor2/internal/middleware,github.com/Iknite-Space/bohikor2/internal/campay,github.com/Iknite-Space/bohikor2/internal/service,github.com/Iknite-Space/bohikor2/internal/authjwt,github.com/Iknite-Space/bohikor2/internal/email,github.com/Iknite-Space/bohikor2/internal/authpassword
+COVER_TEST_PKGS=./internal/handler/... ./internal/server/... ./internal/middleware/... ./internal/campay/... ./internal/service/... ./internal/authjwt/... ./internal/email/... ./internal/authpassword/...
+
+# Coverage over business-logic packages only (reproducible bar for `make test-cover`).
+# The DB-backed code (server.New wiring, Real*Store query wrappers) is exercised
+# by testcontainer integration tests in internal/server, which need Docker. Those
+# tests SKIP automatically when Docker is unavailable, in which case the reported
+# number is lower (that code shows as uncovered) but the suite still passes.
+test-cover:
+	go test -race -coverpkg=$(COVER_PKGS) -coverprofile=coverage.out $(COVER_TEST_PKGS)
+	@go tool cover -func=coverage.out | tail -1
 
 # Generate sqlc code
 generate:

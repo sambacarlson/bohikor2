@@ -8,17 +8,24 @@ package db
 import (
 	"context"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const getSetting = `-- name: GetSetting :one
-SELECT key, value, updated_at, updated_by FROM settings WHERE key = $1
+SELECT company_id, key, value, updated_at, updated_by FROM settings WHERE company_id = $1 AND key = $2
 `
 
-func (q *Queries) GetSetting(ctx context.Context, key string) (Setting, error) {
-	row := q.db.QueryRow(ctx, getSetting, key)
+type GetSettingParams struct {
+	CompanyID uuid.UUID `json:"company_id"`
+	Key       string    `json:"key"`
+}
+
+func (q *Queries) GetSetting(ctx context.Context, arg GetSettingParams) (Setting, error) {
+	row := q.db.QueryRow(ctx, getSetting, arg.CompanyID, arg.Key)
 	var i Setting
 	err := row.Scan(
+		&i.CompanyID,
 		&i.Key,
 		&i.Value,
 		&i.UpdatedAt,
@@ -27,12 +34,12 @@ func (q *Queries) GetSetting(ctx context.Context, key string) (Setting, error) {
 	return i, err
 }
 
-const listSettings = `-- name: ListSettings :many
-SELECT key, value, updated_at, updated_by FROM settings ORDER BY key
+const listSettingsByCompany = `-- name: ListSettingsByCompany :many
+SELECT company_id, key, value, updated_at, updated_by FROM settings WHERE company_id = $1 ORDER BY key
 `
 
-func (q *Queries) ListSettings(ctx context.Context) ([]Setting, error) {
-	rows, err := q.db.Query(ctx, listSettings)
+func (q *Queries) ListSettingsByCompany(ctx context.Context, companyID uuid.UUID) ([]Setting, error) {
+	rows, err := q.db.Query(ctx, listSettingsByCompany, companyID)
 	if err != nil {
 		return nil, err
 	}
@@ -41,6 +48,7 @@ func (q *Queries) ListSettings(ctx context.Context) ([]Setting, error) {
 	for rows.Next() {
 		var i Setting
 		if err := rows.Scan(
+			&i.CompanyID,
 			&i.Key,
 			&i.Value,
 			&i.UpdatedAt,
@@ -56,26 +64,49 @@ func (q *Queries) ListSettings(ctx context.Context) ([]Setting, error) {
 	return items, nil
 }
 
+const seedDefaultSettings = `-- name: SeedDefaultSettings :exec
+INSERT INTO settings (company_id, key, value) VALUES
+    ($1, 'kill_switch_enabled', 'false'),
+    ($1, 'request_window_start_day', '15'),
+    ($1, 'request_window_end_day', '0'),
+    ($1, 'daily_request_limit', '0'),
+    ($1, 'monthly_request_limit', '1'),
+    ($1, 'advance_amount_xaf', '10000')
+`
+
+// Seeds the per-company default settings on company creation.
+func (q *Queries) SeedDefaultSettings(ctx context.Context, companyID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, seedDefaultSettings, companyID)
+	return err
+}
+
 const upsertSetting = `-- name: UpsertSetting :one
-INSERT INTO settings (key, value, updated_by, updated_at)
-VALUES ($1, $2, $3, NOW())
-ON CONFLICT (key) DO UPDATE SET
+INSERT INTO settings (company_id, key, value, updated_by, updated_at)
+VALUES ($1, $2, $3, $4, NOW())
+ON CONFLICT (company_id, key) DO UPDATE SET
     value = EXCLUDED.value,
     updated_by = EXCLUDED.updated_by,
     updated_at = NOW()
-RETURNING key, value, updated_at, updated_by
+RETURNING company_id, key, value, updated_at, updated_by
 `
 
 type UpsertSettingParams struct {
+	CompanyID uuid.UUID   `json:"company_id"`
 	Key       string      `json:"key"`
 	Value     []byte      `json:"value"`
 	UpdatedBy pgtype.UUID `json:"updated_by"`
 }
 
 func (q *Queries) UpsertSetting(ctx context.Context, arg UpsertSettingParams) (Setting, error) {
-	row := q.db.QueryRow(ctx, upsertSetting, arg.Key, arg.Value, arg.UpdatedBy)
+	row := q.db.QueryRow(ctx, upsertSetting,
+		arg.CompanyID,
+		arg.Key,
+		arg.Value,
+		arg.UpdatedBy,
+	)
 	var i Setting
 	err := row.Scan(
+		&i.CompanyID,
 		&i.Key,
 		&i.Value,
 		&i.UpdatedAt,

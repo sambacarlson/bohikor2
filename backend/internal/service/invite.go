@@ -16,7 +16,7 @@ var ErrActiveInvitationExists = errors.New("an active invitation already exists 
 
 type InviteStore interface {
 	GetInvitationByEmail(ctx context.Context, email string) (db.Invitation, error)
-	CreateInvitation(ctx context.Context, email string, invitedBy pgtype.UUID) (db.Invitation, error)
+	CreateInvitation(ctx context.Context, email string, companyID uuid.UUID, invitedBy pgtype.UUID) (db.Invitation, error)
 	UpdateInvitationStatus(ctx context.Context, status db.InvitationStatus, id pgtype.UUID) (db.Invitation, error)
 }
 
@@ -66,7 +66,7 @@ func (s *InviteService) Invite(ctx context.Context, email string, adminID string
 		}
 	}
 
-	invitation, err := s.store.CreateInvitation(ctx, email, invitedBy)
+	invitation, err := s.store.CreateInvitation(ctx, email, admin.CompanyID, invitedBy)
 	if err != nil {
 		return nil, fmt.Errorf("create invitation: %w", err)
 	}
@@ -98,8 +98,9 @@ func (s *RealInviteStore) GetInvitationByEmail(ctx context.Context, email string
 	return s.queries.GetInvitationByEmail(ctx, email)
 }
 
-func (s *RealInviteStore) CreateInvitation(ctx context.Context, email string, invitedBy pgtype.UUID) (db.Invitation, error) {
+func (s *RealInviteStore) CreateInvitation(ctx context.Context, email string, companyID uuid.UUID, invitedBy pgtype.UUID) (db.Invitation, error) {
 	return s.queries.CreateInvitation(ctx, db.CreateInvitationParams{
+		CompanyID: companyID,
 		Email:     email,
 		InvitedBy: invitedBy,
 		SentAt:    time.Now().UTC(),

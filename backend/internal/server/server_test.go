@@ -23,6 +23,8 @@ import (
 
 var errNotFound = errors.New("not found")
 
+var testCompany = uuid.MustParse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+
 type testQuerier struct {
 	admin    *db.Admin
 	adminErr error
@@ -50,8 +52,16 @@ func (q *testQuerier) GetUserByID(ctx context.Context, id uuid.UUID) (db.User, e
 	return *q.user, nil
 }
 
-func makeToken(svc authjwt.TokenService, subjectID, subjectType string) string {
-	token, err := svc.GenerateAccessToken(subjectID, subjectType)
+func (q *testQuerier) GetCompanyByID(ctx context.Context, id uuid.UUID) (db.Company, error) {
+	return db.Company{ID: id, Status: db.CompanyStatusActive}, nil
+}
+
+func (q *testQuerier) GetPlatformAdminByID(ctx context.Context, id uuid.UUID) (db.PlatformAdmin, error) {
+	return db.PlatformAdmin{}, errNotFound
+}
+
+func makeToken(svc authjwt.TokenService, subjectID, subjectType, companyID string) string {
+	token, err := svc.GenerateAccessToken(subjectID, subjectType, companyID)
 	if err != nil {
 		panic(err)
 	}
@@ -83,7 +93,7 @@ func TestHealthHandler_NoAuth(t *testing.T) {
 func TestAdminMeEndpoint_NotAdmin(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	svc := authjwt.NewHS256Service("test-secret", 15*time.Minute)
-	token := makeToken(svc, uuid.New().String(), "user")
+	token := makeToken(svc, uuid.New().String(), "user", testCompany.String())
 	r := gin.New()
 	r.Use(middleware.JWTAuth(svc))
 	r.Use(middleware.RequireAdmin(&testQuerier{}))
@@ -102,7 +112,7 @@ func TestAdminMeEndpoint_NotAdmin(t *testing.T) {
 func TestUserMeEndpoint_UserNotFound(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	svc := authjwt.NewHS256Service("test-secret", 15*time.Minute)
-	token := makeToken(svc, uuid.New().String(), "user")
+	token := makeToken(svc, uuid.New().String(), "user", testCompany.String())
 	r := gin.New()
 	r.Use(middleware.JWTAuth(svc))
 	r.Use(middleware.RequireActiveUser(&testQuerier{}))
@@ -123,12 +133,13 @@ func TestUserMeEndpoint_SuspendedUser(t *testing.T) {
 	userID := uuid.New()
 	q := &testQuerier{
 		user: &db.User{
-			ID:     userID,
-			Status: db.UserStatusSuspended,
+			ID:        userID,
+			CompanyID: testCompany,
+			Status:    db.UserStatusSuspended,
 		},
 	}
 	svc := authjwt.NewHS256Service("test-secret", 15*time.Minute)
-	token := makeToken(svc, userID.String(), "user")
+	token := makeToken(svc, userID.String(), "user", testCompany.String())
 	r := gin.New()
 	r.Use(middleware.JWTAuth(svc))
 	r.Use(middleware.RequireActiveUser(q))
@@ -149,12 +160,12 @@ func TestUserMeEndpoint_ActiveUser(t *testing.T) {
 	userID := uuid.New()
 	q := &testQuerier{
 		user: &db.User{
-			ID: userID, Email: "user@test.com",
+			ID: userID, CompanyID: testCompany, Email: "user@test.com",
 			Status: db.UserStatusActive,
 		},
 	}
 	svc := authjwt.NewHS256Service("test-secret", 15*time.Minute)
-	token := makeToken(svc, userID.String(), "user")
+	token := makeToken(svc, userID.String(), "user", testCompany.String())
 	r := gin.New()
 	r.Use(middleware.JWTAuth(svc))
 	r.Use(middleware.RequireActiveUser(q))
@@ -201,7 +212,7 @@ func (m *mockInviteStore) GetInvitationByEmail(ctx context.Context, email string
 	return *m.invitation, nil
 }
 
-func (m *mockInviteStore) CreateInvitation(ctx context.Context, email string, invitedBy pgtype.UUID) (db.Invitation, error) {
+func (m *mockInviteStore) CreateInvitation(ctx context.Context, email string, companyID uuid.UUID, invitedBy pgtype.UUID) (db.Invitation, error) {
 	if m.createErr != nil {
 		return db.Invitation{}, m.createErr
 	}
@@ -210,10 +221,11 @@ func (m *mockInviteStore) CreateInvitation(ctx context.Context, email string, in
 		return *m.invitation, nil
 	}
 	return db.Invitation{
-		ID:     uuid.New(),
-		Email:  email,
-		Status: db.InvitationStatusSent,
-		SentAt: time.Now().UTC(),
+		ID:        uuid.New(),
+		CompanyID: companyID,
+		Email:     email,
+		Status:    db.InvitationStatusSent,
+		SentAt:    time.Now().UTC(),
 	}, nil
 }
 
@@ -241,12 +253,12 @@ func TestInviteEndpoint_AdminInvites(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	adminID := uuid.New()
 	svc := authjwt.NewHS256Service("test-secret", 15*time.Minute)
-	token := makeToken(svc, adminID.String(), "admin")
+	token := makeToken(svc, adminID.String(), "admin", testCompany.String())
 	adminQuerier := &testQuerier{
 		admin: &db.Admin{
-			ID:           adminID,
-			Email:        "admin@example.com",
-			PasswordHash: "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy",
+			ID:        adminID,
+			CompanyID: testCompany,
+			Email:     "admin@example.com",
 		},
 	}
 	inviteStore := &mockInviteStore{
@@ -287,12 +299,12 @@ func TestInviteEndpoint_DuplicateInvitation(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	adminID := uuid.New()
 	svc := authjwt.NewHS256Service("test-secret", 15*time.Minute)
-	token := makeToken(svc, adminID.String(), "admin")
+	token := makeToken(svc, adminID.String(), "admin", testCompany.String())
 	adminQuerier := &testQuerier{
 		admin: &db.Admin{
-			ID:           adminID,
-			Email:        "admin@example.com",
-			PasswordHash: "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy",
+			ID:        adminID,
+			CompanyID: testCompany,
+			Email:     "admin@example.com",
 		},
 	}
 	inviteStore := &mockInviteStore{

@@ -12,8 +12,8 @@ import (
 )
 
 type usersQuerier interface {
-	ListUsers(ctx context.Context, arg db.ListUsersParams) ([]db.User, error)
-	UnlockUser(ctx context.Context, id uuid.UUID) (db.User, error)
+	ListUsersByCompany(ctx context.Context, arg db.ListUsersByCompanyParams) ([]db.User, error)
+	UnlockUser(ctx context.Context, arg db.UnlockUserParams) (db.User, error)
 	UpdateUserStatus(ctx context.Context, arg db.UpdateUserStatusParams) (db.User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (db.User, error)
 	ResetEmailOTPFailures(ctx context.Context, email string) error
@@ -21,6 +21,11 @@ type usersQuerier interface {
 
 func HandleListUsers(q usersQuerier) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		companyID, ok := companyIDFromContext(c)
+		if !ok {
+			return
+		}
+
 		pageStr := c.DefaultQuery("page", "1")
 		perPageStr := c.DefaultQuery("per_page", "20")
 
@@ -33,9 +38,10 @@ func HandleListUsers(q usersQuerier) gin.HandlerFunc {
 			perPage = 20
 		}
 
-		users, err := q.ListUsers(c.Request.Context(), db.ListUsersParams{
-			Limit:  int32(perPage),
-			Offset: int32((page - 1) * perPage),
+		users, err := q.ListUsersByCompany(c.Request.Context(), db.ListUsersByCompanyParams{
+			CompanyID: companyID,
+			Limit:     int32(perPage),
+			Offset:    int32((page - 1) * perPage),
 		})
 		if err != nil {
 			JSONError(c, http.StatusInternalServerError, "internal_error", "failed to list users")
@@ -52,8 +58,14 @@ func HandleListUsers(q usersQuerier) gin.HandlerFunc {
 
 // HandleUnlockUser unlocks the user and also resets their OTP failure
 // counter — admins should clear both PIN and OTP blocks in one action.
+// Scoped to the admin's company so cross-tenant ids resolve to "not found".
 func HandleUnlockUser(q usersQuerier) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		companyID, ok := companyIDFromContext(c)
+		if !ok {
+			return
+		}
+
 		userIDStr := c.Param("id")
 		userID, err := uuid.Parse(userIDStr)
 		if err != nil {
@@ -61,7 +73,10 @@ func HandleUnlockUser(q usersQuerier) gin.HandlerFunc {
 			return
 		}
 
-		user, err := q.UnlockUser(c.Request.Context(), userID)
+		user, err := q.UnlockUser(c.Request.Context(), db.UnlockUserParams{
+			ID:        userID,
+			CompanyID: companyID,
+		})
 		if err != nil {
 			JSONError(c, http.StatusNotFound, "not_found", "user not found")
 			return
@@ -77,29 +92,21 @@ func HandleUnlockUser(q usersQuerier) gin.HandlerFunc {
 }
 
 func HandleSuspendUser(q usersQuerier) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		userIDStr := c.Param("id")
-		userID, err := uuid.Parse(userIDStr)
-		if err != nil {
-			JSONError(c, http.StatusBadRequest, "invalid_id", "invalid user ID")
-			return
-		}
-
-		user, err := q.UpdateUserStatus(c.Request.Context(), db.UpdateUserStatusParams{
-			ID:     userID,
-			Status: db.UserStatusSuspended,
-		})
-		if err != nil {
-			JSONError(c, http.StatusNotFound, "not_found", "user not found")
-			return
-		}
-
-		JSONSuccess(c, http.StatusOK, user)
-	}
+	return updateUserStatusHandler(q, db.UserStatusSuspended)
 }
 
 func HandleActivateUser(q usersQuerier) gin.HandlerFunc {
+	return updateUserStatusHandler(q, db.UserStatusActive)
+}
+
+// updateUserStatusHandler suspends/activates a target user within the admin's company.
+func updateUserStatusHandler(q usersQuerier, status db.UserStatus) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		companyID, ok := companyIDFromContext(c)
+		if !ok {
+			return
+		}
+
 		userIDStr := c.Param("id")
 		userID, err := uuid.Parse(userIDStr)
 		if err != nil {
@@ -108,8 +115,9 @@ func HandleActivateUser(q usersQuerier) gin.HandlerFunc {
 		}
 
 		user, err := q.UpdateUserStatus(c.Request.Context(), db.UpdateUserStatusParams{
-			ID:     userID,
-			Status: db.UserStatusActive,
+			ID:        userID,
+			Status:    status,
+			CompanyID: companyID,
 		})
 		if err != nil {
 			JSONError(c, http.StatusNotFound, "not_found", "user not found")

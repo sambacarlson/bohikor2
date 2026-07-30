@@ -1,13 +1,14 @@
 -- name: CreatePhoneVerification :one
-INSERT INTO phone_verifications (user_id, phone_number, amount_xaf, status)
-VALUES ($1, $2, $3, $4) RETURNING *;
+INSERT INTO phone_verifications (company_id, user_id, phone_number, amount_xaf, status)
+VALUES ($1, $2, $3, $4, $5) RETURNING *;
 
 -- name: GetPhoneVerificationByCampayRef :one
+-- Webhook resolves by Campay reference (globally unique); no company context.
 SELECT * FROM phone_verifications WHERE campay_payout_ref = $1;
 
 -- name: GetActivePhoneVerificationByUser :one
 SELECT * FROM phone_verifications
-WHERE user_id = $1 AND status IN ('initiated', 'pending')
+WHERE user_id = $1 AND status IN ('initiated', 'processing', 'pending')
 ORDER BY created_at DESC LIMIT 1;
 
 -- name: UpdatePhoneVerificationStatus :one

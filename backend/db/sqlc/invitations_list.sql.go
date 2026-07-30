@@ -7,14 +7,16 @@ package db
 
 import (
 	"context"
+
+	"github.com/google/uuid"
 )
 
-const listInvitations = `-- name: ListInvitations :many
-SELECT id, email, status, invited_by, sent_at, accepted_at, updated_at FROM invitations ORDER BY sent_at DESC
+const listInvitationsByCompany = `-- name: ListInvitationsByCompany :many
+SELECT id, company_id, email, status, invited_by, sent_at, accepted_at, updated_at FROM invitations WHERE company_id = $1 ORDER BY sent_at DESC
 `
 
-func (q *Queries) ListInvitations(ctx context.Context) ([]Invitation, error) {
-	rows, err := q.db.Query(ctx, listInvitations)
+func (q *Queries) ListInvitationsByCompany(ctx context.Context, companyID uuid.UUID) ([]Invitation, error) {
+	rows, err := q.db.Query(ctx, listInvitationsByCompany, companyID)
 	if err != nil {
 		return nil, err
 	}
@@ -24,6 +26,7 @@ func (q *Queries) ListInvitations(ctx context.Context) ([]Invitation, error) {
 		var i Invitation
 		if err := rows.Scan(
 			&i.ID,
+			&i.CompanyID,
 			&i.Email,
 			&i.Status,
 			&i.InvitedBy,

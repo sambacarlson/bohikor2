@@ -17,10 +17,11 @@ import (
 func main() {
 	email := flag.String("email", "", "Admin email address")
 	password := flag.String("password", "", "Admin password")
+	companySlug := flag.String("company", "", "Company slug the admin belongs to")
 	flag.Parse()
 
-	if *email == "" || *password == "" {
-		fmt.Fprintln(os.Stderr, "Usage: create-admin --email=<email> --password=<password>")
+	if *email == "" || *password == "" || *companySlug == "" {
+		fmt.Fprintln(os.Stderr, "Usage: create-admin --company=<slug> --email=<email> --password=<password>")
 		os.Exit(1)
 	}
 
@@ -39,12 +40,18 @@ func main() {
 	queries := db.New(pool)
 	hasher := authpassword.NewBcryptHasher()
 
+	company, err := queries.GetCompanyBySlug(ctx, *companySlug)
+	if err != nil {
+		log.Fatalf("lookup company %q: %v", *companySlug, err)
+	}
+
 	hashed, err := hasher.Hash(*password)
 	if err != nil {
 		log.Fatalf("hash password: %v", err)
 	}
 
 	admin, err := queries.CreateAdmin(ctx, db.CreateAdminParams{
+		CompanyID:    company.ID,
 		Email:        *email,
 		PasswordHash: hashed,
 	})
@@ -52,5 +59,5 @@ func main() {
 		log.Fatalf("create admin: %v", err)
 	}
 
-	fmt.Printf("Admin created: id=%s email=%s\n", admin.ID, admin.Email)
+	fmt.Printf("Admin created: id=%s email=%s company=%s\n", admin.ID, admin.Email, company.Slug)
 }

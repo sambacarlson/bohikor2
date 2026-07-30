@@ -16,15 +16,16 @@ import (
 
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (
-    email, email_verified, full_name,
+    company_id, email, email_verified, full_name,
     phone_number, phone_verified, status,
     pin_hash
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7
-) RETURNING id, email, email_verified, full_name, phone_number, phone_verified, status, is_terms_accepted, terms_accepted_at, terms_version, user_ip_at_consent, created_at, updated_at, pin_hash, failed_login_attempts, locked_until
+    $1, $2, $3, $4, $5, $6, $7, $8
+) RETURNING id, company_id, email, email_verified, full_name, phone_number, phone_verified, pin_hash, failed_login_attempts, locked_until, status, is_terms_accepted, terms_accepted_at, terms_version, user_ip_at_consent, created_at, updated_at
 `
 
 type CreateUserParams struct {
+	CompanyID     uuid.UUID   `json:"company_id"`
 	Email         string      `json:"email"`
 	EmailVerified bool        `json:"email_verified"`
 	FullName      pgtype.Text `json:"full_name"`
@@ -36,6 +37,7 @@ type CreateUserParams struct {
 
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, error) {
 	row := q.db.QueryRow(ctx, createUser,
+		arg.CompanyID,
 		arg.Email,
 		arg.EmailVerified,
 		arg.FullName,
@@ -47,11 +49,15 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 	var i User
 	err := row.Scan(
 		&i.ID,
+		&i.CompanyID,
 		&i.Email,
 		&i.EmailVerified,
 		&i.FullName,
 		&i.PhoneNumber,
 		&i.PhoneVerified,
+		&i.PinHash,
+		&i.FailedLoginAttempts,
+		&i.LockedUntil,
 		&i.Status,
 		&i.IsTermsAccepted,
 		&i.TermsAcceptedAt,
@@ -59,27 +65,29 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.UserIpAtConsent,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.PinHash,
-		&i.FailedLoginAttempts,
-		&i.LockedUntil,
 	)
 	return i, err
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, email_verified, full_name, phone_number, phone_verified, status, is_terms_accepted, terms_accepted_at, terms_version, user_ip_at_consent, created_at, updated_at, pin_hash, failed_login_attempts, locked_until FROM users WHERE email = $1 LIMIT 1
+SELECT id, company_id, email, email_verified, full_name, phone_number, phone_verified, pin_hash, failed_login_attempts, locked_until, status, is_terms_accepted, terms_accepted_at, terms_version, user_ip_at_consent, created_at, updated_at FROM users WHERE email = $1 LIMIT 1
 `
 
+// Pre-auth resolution: user email is globally unique. Returns company_id.
 func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
 	row := q.db.QueryRow(ctx, getUserByEmail, email)
 	var i User
 	err := row.Scan(
 		&i.ID,
+		&i.CompanyID,
 		&i.Email,
 		&i.EmailVerified,
 		&i.FullName,
 		&i.PhoneNumber,
 		&i.PhoneVerified,
+		&i.PinHash,
+		&i.FailedLoginAttempts,
+		&i.LockedUntil,
 		&i.Status,
 		&i.IsTermsAccepted,
 		&i.TermsAcceptedAt,
@@ -87,27 +95,29 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.UserIpAtConsent,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.PinHash,
-		&i.FailedLoginAttempts,
-		&i.LockedUntil,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, email, email_verified, full_name, phone_number, phone_verified, status, is_terms_accepted, terms_accepted_at, terms_version, user_ip_at_consent, created_at, updated_at, pin_hash, failed_login_attempts, locked_until FROM users WHERE id = $1 LIMIT 1
+SELECT id, company_id, email, email_verified, full_name, phone_number, phone_verified, pin_hash, failed_login_attempts, locked_until, status, is_terms_accepted, terms_accepted_at, terms_version, user_ip_at_consent, created_at, updated_at FROM users WHERE id = $1 LIMIT 1
 `
 
+// Self lookup: id comes from the authenticated claim; caller asserts company match.
 func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 	row := q.db.QueryRow(ctx, getUserByID, id)
 	var i User
 	err := row.Scan(
 		&i.ID,
+		&i.CompanyID,
 		&i.Email,
 		&i.EmailVerified,
 		&i.FullName,
 		&i.PhoneNumber,
 		&i.PhoneVerified,
+		&i.PinHash,
+		&i.FailedLoginAttempts,
+		&i.LockedUntil,
 		&i.Status,
 		&i.IsTermsAccepted,
 		&i.TermsAcceptedAt,
@@ -115,15 +125,12 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 		&i.UserIpAtConsent,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.PinHash,
-		&i.FailedLoginAttempts,
-		&i.LockedUntil,
 	)
 	return i, err
 }
 
 const getUserByPhoneNumber = `-- name: GetUserByPhoneNumber :one
-SELECT id, email, email_verified, full_name, phone_number, phone_verified, status, is_terms_accepted, terms_accepted_at, terms_version, user_ip_at_consent, created_at, updated_at, pin_hash, failed_login_attempts, locked_until FROM users WHERE phone_number = $1 LIMIT 1
+SELECT id, company_id, email, email_verified, full_name, phone_number, phone_verified, pin_hash, failed_login_attempts, locked_until, status, is_terms_accepted, terms_accepted_at, terms_version, user_ip_at_consent, created_at, updated_at FROM users WHERE phone_number = $1 LIMIT 1
 `
 
 func (q *Queries) GetUserByPhoneNumber(ctx context.Context, phoneNumber pgtype.Text) (User, error) {
@@ -131,11 +138,15 @@ func (q *Queries) GetUserByPhoneNumber(ctx context.Context, phoneNumber pgtype.T
 	var i User
 	err := row.Scan(
 		&i.ID,
+		&i.CompanyID,
 		&i.Email,
 		&i.EmailVerified,
 		&i.FullName,
 		&i.PhoneNumber,
 		&i.PhoneVerified,
+		&i.PinHash,
+		&i.FailedLoginAttempts,
+		&i.LockedUntil,
 		&i.Status,
 		&i.IsTermsAccepted,
 		&i.TermsAcceptedAt,
@@ -143,16 +154,13 @@ func (q *Queries) GetUserByPhoneNumber(ctx context.Context, phoneNumber pgtype.T
 		&i.UserIpAtConsent,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.PinHash,
-		&i.FailedLoginAttempts,
-		&i.LockedUntil,
 	)
 	return i, err
 }
 
 const incrementFailedLoginAttempts = `-- name: IncrementFailedLoginAttempts :one
 UPDATE users SET failed_login_attempts = failed_login_attempts + 1, updated_at = NOW()
-WHERE id = $1 RETURNING id, email, email_verified, full_name, phone_number, phone_verified, status, is_terms_accepted, terms_accepted_at, terms_version, user_ip_at_consent, created_at, updated_at, pin_hash, failed_login_attempts, locked_until
+WHERE id = $1 RETURNING id, company_id, email, email_verified, full_name, phone_number, phone_verified, pin_hash, failed_login_attempts, locked_until, status, is_terms_accepted, terms_accepted_at, terms_version, user_ip_at_consent, created_at, updated_at
 `
 
 func (q *Queries) IncrementFailedLoginAttempts(ctx context.Context, id uuid.UUID) (User, error) {
@@ -160,11 +168,15 @@ func (q *Queries) IncrementFailedLoginAttempts(ctx context.Context, id uuid.UUID
 	var i User
 	err := row.Scan(
 		&i.ID,
+		&i.CompanyID,
 		&i.Email,
 		&i.EmailVerified,
 		&i.FullName,
 		&i.PhoneNumber,
 		&i.PhoneVerified,
+		&i.PinHash,
+		&i.FailedLoginAttempts,
+		&i.LockedUntil,
 		&i.Status,
 		&i.IsTermsAccepted,
 		&i.TermsAcceptedAt,
@@ -172,26 +184,25 @@ func (q *Queries) IncrementFailedLoginAttempts(ctx context.Context, id uuid.UUID
 		&i.UserIpAtConsent,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.PinHash,
-		&i.FailedLoginAttempts,
-		&i.LockedUntil,
 	)
 	return i, err
 }
 
-const listUsers = `-- name: ListUsers :many
-SELECT id, email, email_verified, full_name, phone_number, phone_verified, status, is_terms_accepted, terms_accepted_at, terms_version, user_ip_at_consent, created_at, updated_at, pin_hash, failed_login_attempts, locked_until FROM users
+const listUsersByCompany = `-- name: ListUsersByCompany :many
+SELECT id, company_id, email, email_verified, full_name, phone_number, phone_verified, pin_hash, failed_login_attempts, locked_until, status, is_terms_accepted, terms_accepted_at, terms_version, user_ip_at_consent, created_at, updated_at FROM users
+WHERE company_id = $1
 ORDER BY created_at DESC
-LIMIT $1 OFFSET $2
+LIMIT $2 OFFSET $3
 `
 
-type ListUsersParams struct {
-	Limit  int32 `json:"limit"`
-	Offset int32 `json:"offset"`
+type ListUsersByCompanyParams struct {
+	CompanyID uuid.UUID `json:"company_id"`
+	Limit     int32     `json:"limit"`
+	Offset    int32     `json:"offset"`
 }
 
-func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]User, error) {
-	rows, err := q.db.Query(ctx, listUsers, arg.Limit, arg.Offset)
+func (q *Queries) ListUsersByCompany(ctx context.Context, arg ListUsersByCompanyParams) ([]User, error) {
+	rows, err := q.db.Query(ctx, listUsersByCompany, arg.CompanyID, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}
@@ -201,11 +212,15 @@ func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]User, e
 		var i User
 		if err := rows.Scan(
 			&i.ID,
+			&i.CompanyID,
 			&i.Email,
 			&i.EmailVerified,
 			&i.FullName,
 			&i.PhoneNumber,
 			&i.PhoneVerified,
+			&i.PinHash,
+			&i.FailedLoginAttempts,
+			&i.LockedUntil,
 			&i.Status,
 			&i.IsTermsAccepted,
 			&i.TermsAcceptedAt,
@@ -213,9 +228,6 @@ func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]User, e
 			&i.UserIpAtConsent,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.PinHash,
-			&i.FailedLoginAttempts,
-			&i.LockedUntil,
 		); err != nil {
 			return nil, err
 		}
@@ -229,7 +241,7 @@ func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]User, e
 
 const lockUser = `-- name: LockUser :one
 UPDATE users SET status = 'locked', updated_at = NOW()
-WHERE id = $1 RETURNING id, email, email_verified, full_name, phone_number, phone_verified, status, is_terms_accepted, terms_accepted_at, terms_version, user_ip_at_consent, created_at, updated_at, pin_hash, failed_login_attempts, locked_until
+WHERE id = $1 RETURNING id, company_id, email, email_verified, full_name, phone_number, phone_verified, pin_hash, failed_login_attempts, locked_until, status, is_terms_accepted, terms_accepted_at, terms_version, user_ip_at_consent, created_at, updated_at
 `
 
 func (q *Queries) LockUser(ctx context.Context, id uuid.UUID) (User, error) {
@@ -237,11 +249,15 @@ func (q *Queries) LockUser(ctx context.Context, id uuid.UUID) (User, error) {
 	var i User
 	err := row.Scan(
 		&i.ID,
+		&i.CompanyID,
 		&i.Email,
 		&i.EmailVerified,
 		&i.FullName,
 		&i.PhoneNumber,
 		&i.PhoneVerified,
+		&i.PinHash,
+		&i.FailedLoginAttempts,
+		&i.LockedUntil,
 		&i.Status,
 		&i.IsTermsAccepted,
 		&i.TermsAcceptedAt,
@@ -249,16 +265,13 @@ func (q *Queries) LockUser(ctx context.Context, id uuid.UUID) (User, error) {
 		&i.UserIpAtConsent,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.PinHash,
-		&i.FailedLoginAttempts,
-		&i.LockedUntil,
 	)
 	return i, err
 }
 
 const lockUserUntil = `-- name: LockUserUntil :one
 UPDATE users SET locked_until = $2, updated_at = NOW()
-WHERE id = $1 RETURNING id, email, email_verified, full_name, phone_number, phone_verified, status, is_terms_accepted, terms_accepted_at, terms_version, user_ip_at_consent, created_at, updated_at, pin_hash, failed_login_attempts, locked_until
+WHERE id = $1 RETURNING id, company_id, email, email_verified, full_name, phone_number, phone_verified, pin_hash, failed_login_attempts, locked_until, status, is_terms_accepted, terms_accepted_at, terms_version, user_ip_at_consent, created_at, updated_at
 `
 
 type LockUserUntilParams struct {
@@ -271,11 +284,15 @@ func (q *Queries) LockUserUntil(ctx context.Context, arg LockUserUntilParams) (U
 	var i User
 	err := row.Scan(
 		&i.ID,
+		&i.CompanyID,
 		&i.Email,
 		&i.EmailVerified,
 		&i.FullName,
 		&i.PhoneNumber,
 		&i.PhoneVerified,
+		&i.PinHash,
+		&i.FailedLoginAttempts,
+		&i.LockedUntil,
 		&i.Status,
 		&i.IsTermsAccepted,
 		&i.TermsAcceptedAt,
@@ -283,16 +300,13 @@ func (q *Queries) LockUserUntil(ctx context.Context, arg LockUserUntilParams) (U
 		&i.UserIpAtConsent,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.PinHash,
-		&i.FailedLoginAttempts,
-		&i.LockedUntil,
 	)
 	return i, err
 }
 
 const resetLoginAttempts = `-- name: ResetLoginAttempts :one
 UPDATE users SET failed_login_attempts = 0, locked_until = NULL, updated_at = NOW()
-WHERE id = $1 RETURNING id, email, email_verified, full_name, phone_number, phone_verified, status, is_terms_accepted, terms_accepted_at, terms_version, user_ip_at_consent, created_at, updated_at, pin_hash, failed_login_attempts, locked_until
+WHERE id = $1 RETURNING id, company_id, email, email_verified, full_name, phone_number, phone_verified, pin_hash, failed_login_attempts, locked_until, status, is_terms_accepted, terms_accepted_at, terms_version, user_ip_at_consent, created_at, updated_at
 `
 
 func (q *Queries) ResetLoginAttempts(ctx context.Context, id uuid.UUID) (User, error) {
@@ -300,11 +314,15 @@ func (q *Queries) ResetLoginAttempts(ctx context.Context, id uuid.UUID) (User, e
 	var i User
 	err := row.Scan(
 		&i.ID,
+		&i.CompanyID,
 		&i.Email,
 		&i.EmailVerified,
 		&i.FullName,
 		&i.PhoneNumber,
 		&i.PhoneVerified,
+		&i.PinHash,
+		&i.FailedLoginAttempts,
+		&i.LockedUntil,
 		&i.Status,
 		&i.IsTermsAccepted,
 		&i.TermsAcceptedAt,
@@ -312,16 +330,13 @@ func (q *Queries) ResetLoginAttempts(ctx context.Context, id uuid.UUID) (User, e
 		&i.UserIpAtConsent,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.PinHash,
-		&i.FailedLoginAttempts,
-		&i.LockedUntil,
 	)
 	return i, err
 }
 
 const setPhoneVerified = `-- name: SetPhoneVerified :one
 UPDATE users SET phone_verified = true, updated_at = NOW()
-WHERE id = $1 RETURNING id, email, email_verified, full_name, phone_number, phone_verified, status, is_terms_accepted, terms_accepted_at, terms_version, user_ip_at_consent, created_at, updated_at, pin_hash, failed_login_attempts, locked_until
+WHERE id = $1 RETURNING id, company_id, email, email_verified, full_name, phone_number, phone_verified, pin_hash, failed_login_attempts, locked_until, status, is_terms_accepted, terms_accepted_at, terms_version, user_ip_at_consent, created_at, updated_at
 `
 
 func (q *Queries) SetPhoneVerified(ctx context.Context, id uuid.UUID) (User, error) {
@@ -329,11 +344,15 @@ func (q *Queries) SetPhoneVerified(ctx context.Context, id uuid.UUID) (User, err
 	var i User
 	err := row.Scan(
 		&i.ID,
+		&i.CompanyID,
 		&i.Email,
 		&i.EmailVerified,
 		&i.FullName,
 		&i.PhoneNumber,
 		&i.PhoneVerified,
+		&i.PinHash,
+		&i.FailedLoginAttempts,
+		&i.LockedUntil,
 		&i.Status,
 		&i.IsTermsAccepted,
 		&i.TermsAcceptedAt,
@@ -341,28 +360,35 @@ func (q *Queries) SetPhoneVerified(ctx context.Context, id uuid.UUID) (User, err
 		&i.UserIpAtConsent,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.PinHash,
-		&i.FailedLoginAttempts,
-		&i.LockedUntil,
 	)
 	return i, err
 }
 
 const unlockUser = `-- name: UnlockUser :one
 UPDATE users SET status = 'active', failed_login_attempts = 0, locked_until = NULL, updated_at = NOW()
-WHERE id = $1 RETURNING id, email, email_verified, full_name, phone_number, phone_verified, status, is_terms_accepted, terms_accepted_at, terms_version, user_ip_at_consent, created_at, updated_at, pin_hash, failed_login_attempts, locked_until
+WHERE id = $1 AND company_id = $2 RETURNING id, company_id, email, email_verified, full_name, phone_number, phone_verified, pin_hash, failed_login_attempts, locked_until, status, is_terms_accepted, terms_accepted_at, terms_version, user_ip_at_consent, created_at, updated_at
 `
 
-func (q *Queries) UnlockUser(ctx context.Context, id uuid.UUID) (User, error) {
-	row := q.db.QueryRow(ctx, unlockUser, id)
+type UnlockUserParams struct {
+	ID        uuid.UUID `json:"id"`
+	CompanyID uuid.UUID `json:"company_id"`
+}
+
+// Admin action on a target user; scoped to the admin's company.
+func (q *Queries) UnlockUser(ctx context.Context, arg UnlockUserParams) (User, error) {
+	row := q.db.QueryRow(ctx, unlockUser, arg.ID, arg.CompanyID)
 	var i User
 	err := row.Scan(
 		&i.ID,
+		&i.CompanyID,
 		&i.Email,
 		&i.EmailVerified,
 		&i.FullName,
 		&i.PhoneNumber,
 		&i.PhoneVerified,
+		&i.PinHash,
+		&i.FailedLoginAttempts,
+		&i.LockedUntil,
 		&i.Status,
 		&i.IsTermsAccepted,
 		&i.TermsAcceptedAt,
@@ -370,16 +396,13 @@ func (q *Queries) UnlockUser(ctx context.Context, id uuid.UUID) (User, error) {
 		&i.UserIpAtConsent,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.PinHash,
-		&i.FailedLoginAttempts,
-		&i.LockedUntil,
 	)
 	return i, err
 }
 
 const updatePhoneNumber = `-- name: UpdatePhoneNumber :one
 UPDATE users SET phone_number = $2, phone_verified = false, updated_at = NOW()
-WHERE id = $1 RETURNING id, email, email_verified, full_name, phone_number, phone_verified, status, is_terms_accepted, terms_accepted_at, terms_version, user_ip_at_consent, created_at, updated_at, pin_hash, failed_login_attempts, locked_until
+WHERE id = $1 RETURNING id, company_id, email, email_verified, full_name, phone_number, phone_verified, pin_hash, failed_login_attempts, locked_until, status, is_terms_accepted, terms_accepted_at, terms_version, user_ip_at_consent, created_at, updated_at
 `
 
 type UpdatePhoneNumberParams struct {
@@ -392,11 +415,15 @@ func (q *Queries) UpdatePhoneNumber(ctx context.Context, arg UpdatePhoneNumberPa
 	var i User
 	err := row.Scan(
 		&i.ID,
+		&i.CompanyID,
 		&i.Email,
 		&i.EmailVerified,
 		&i.FullName,
 		&i.PhoneNumber,
 		&i.PhoneVerified,
+		&i.PinHash,
+		&i.FailedLoginAttempts,
+		&i.LockedUntil,
 		&i.Status,
 		&i.IsTermsAccepted,
 		&i.TermsAcceptedAt,
@@ -404,9 +431,6 @@ func (q *Queries) UpdatePhoneNumber(ctx context.Context, arg UpdatePhoneNumberPa
 		&i.UserIpAtConsent,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.PinHash,
-		&i.FailedLoginAttempts,
-		&i.LockedUntil,
 	)
 	return i, err
 }
@@ -418,7 +442,7 @@ UPDATE users SET
     terms_version = $4,
     user_ip_at_consent = $5,
     updated_at = NOW()
-WHERE id = $1 RETURNING id, email, email_verified, full_name, phone_number, phone_verified, status, is_terms_accepted, terms_accepted_at, terms_version, user_ip_at_consent, created_at, updated_at, pin_hash, failed_login_attempts, locked_until
+WHERE id = $1 RETURNING id, company_id, email, email_verified, full_name, phone_number, phone_verified, pin_hash, failed_login_attempts, locked_until, status, is_terms_accepted, terms_accepted_at, terms_version, user_ip_at_consent, created_at, updated_at
 `
 
 type UpdateTermsAcceptanceParams struct {
@@ -440,11 +464,15 @@ func (q *Queries) UpdateTermsAcceptance(ctx context.Context, arg UpdateTermsAcce
 	var i User
 	err := row.Scan(
 		&i.ID,
+		&i.CompanyID,
 		&i.Email,
 		&i.EmailVerified,
 		&i.FullName,
 		&i.PhoneNumber,
 		&i.PhoneVerified,
+		&i.PinHash,
+		&i.FailedLoginAttempts,
+		&i.LockedUntil,
 		&i.Status,
 		&i.IsTermsAccepted,
 		&i.TermsAcceptedAt,
@@ -452,16 +480,13 @@ func (q *Queries) UpdateTermsAcceptance(ctx context.Context, arg UpdateTermsAcce
 		&i.UserIpAtConsent,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.PinHash,
-		&i.FailedLoginAttempts,
-		&i.LockedUntil,
 	)
 	return i, err
 }
 
 const updateUserPinHash = `-- name: UpdateUserPinHash :one
 UPDATE users SET pin_hash = $2, updated_at = NOW()
-WHERE id = $1 RETURNING id, email, email_verified, full_name, phone_number, phone_verified, status, is_terms_accepted, terms_accepted_at, terms_version, user_ip_at_consent, created_at, updated_at, pin_hash, failed_login_attempts, locked_until
+WHERE id = $1 RETURNING id, company_id, email, email_verified, full_name, phone_number, phone_verified, pin_hash, failed_login_attempts, locked_until, status, is_terms_accepted, terms_accepted_at, terms_version, user_ip_at_consent, created_at, updated_at
 `
 
 type UpdateUserPinHashParams struct {
@@ -474,11 +499,15 @@ func (q *Queries) UpdateUserPinHash(ctx context.Context, arg UpdateUserPinHashPa
 	var i User
 	err := row.Scan(
 		&i.ID,
+		&i.CompanyID,
 		&i.Email,
 		&i.EmailVerified,
 		&i.FullName,
 		&i.PhoneNumber,
 		&i.PhoneVerified,
+		&i.PinHash,
+		&i.FailedLoginAttempts,
+		&i.LockedUntil,
 		&i.Status,
 		&i.IsTermsAccepted,
 		&i.TermsAcceptedAt,
@@ -486,33 +515,36 @@ func (q *Queries) UpdateUserPinHash(ctx context.Context, arg UpdateUserPinHashPa
 		&i.UserIpAtConsent,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.PinHash,
-		&i.FailedLoginAttempts,
-		&i.LockedUntil,
 	)
 	return i, err
 }
 
 const updateUserStatus = `-- name: UpdateUserStatus :one
 UPDATE users SET status = $2, updated_at = NOW()
-WHERE id = $1 RETURNING id, email, email_verified, full_name, phone_number, phone_verified, status, is_terms_accepted, terms_accepted_at, terms_version, user_ip_at_consent, created_at, updated_at, pin_hash, failed_login_attempts, locked_until
+WHERE id = $1 AND company_id = $3 RETURNING id, company_id, email, email_verified, full_name, phone_number, phone_verified, pin_hash, failed_login_attempts, locked_until, status, is_terms_accepted, terms_accepted_at, terms_version, user_ip_at_consent, created_at, updated_at
 `
 
 type UpdateUserStatusParams struct {
-	ID     uuid.UUID  `json:"id"`
-	Status UserStatus `json:"status"`
+	ID        uuid.UUID  `json:"id"`
+	Status    UserStatus `json:"status"`
+	CompanyID uuid.UUID  `json:"company_id"`
 }
 
+// Admin action on a target user; scoped to the admin's company.
 func (q *Queries) UpdateUserStatus(ctx context.Context, arg UpdateUserStatusParams) (User, error) {
-	row := q.db.QueryRow(ctx, updateUserStatus, arg.ID, arg.Status)
+	row := q.db.QueryRow(ctx, updateUserStatus, arg.ID, arg.Status, arg.CompanyID)
 	var i User
 	err := row.Scan(
 		&i.ID,
+		&i.CompanyID,
 		&i.Email,
 		&i.EmailVerified,
 		&i.FullName,
 		&i.PhoneNumber,
 		&i.PhoneVerified,
+		&i.PinHash,
+		&i.FailedLoginAttempts,
+		&i.LockedUntil,
 		&i.Status,
 		&i.IsTermsAccepted,
 		&i.TermsAcceptedAt,
@@ -520,9 +552,6 @@ func (q *Queries) UpdateUserStatus(ctx context.Context, arg UpdateUserStatusPara
 		&i.UserIpAtConsent,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.PinHash,
-		&i.FailedLoginAttempts,
-		&i.LockedUntil,
 	)
 	return i, err
 }

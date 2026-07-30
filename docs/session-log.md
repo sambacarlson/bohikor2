@@ -1,5 +1,25 @@
 # Session Log
 
+## 2026-07-29 — Epic 6: Multi-tenant foundation (backend) (Complete)
+
+### What we did
+- **Migrations rewritten to a clean multi-tenant baseline** (`000001_schema.up/down.sql`) — deleted stale `000002`–`000007` (authorized greenfield). Added `platform_admins`, `companies`, `company_ledger`; every domain table gains `company_id NOT NULL` (nullable only on `events`); new enums `company_status` and `request_status` value `processing`; `settings` PK becomes composite `(company_id, key)`; `refresh_tokens.subject_type` allows `platform_admin`; advance-request resilience columns (`attempt_count`, `last_reconciled_at`, `next_retry_at`, `needs_admin_review`) baked in now for Epic 7. Validated up→down→up against real Postgres 18.4.
+- **sqlc queries** — new `companies.sql`, `platform_admins.sql`, `company_ledger.sql` (CreateLedgerEntry, GetCompanyBalance=SUM, list); threaded `company_id` through users/admins/invitations/advance_requests/phone_verifications/events; `settings.sql` composite key + `SeedDefaultSettings`. Pre-auth queries (GetUserByEmail, GetAdminByEmail, GetActiveInvitationByEmail, both OTP tables) stay email-only.
+- **JWT + middleware** — access token gains a `company_id` claim (empty for platform admins); `generateTokenPair` takes company id; refresh **re-derives** company from the subject. `RequireAdmin`/`RequireActiveUser` assert `record.company_id == claim` (403 "company mismatch") and reject suspended companies; new `RequirePlatformAdmin`.
+- **Platform handler** (`platform.go`) under `/api/platform/*` — create company (tx: company row + seeded settings via `RealPlatformStore.CreateCompanyWithSettings`), create first admin, ledger `topup`, list/detail with computed balance, suspend/activate.
+- **Auth** — `Login` resolves company from email, blocks suspended companies, returns `company_slug`; new `POST /api/auth/platform/login`. `CreatePin` sources the new user's `company_id` from their invitation.
+- **Company scoping** threaded through invitations/users/settings/events/advance/phone handlers; every `CreateEvent` passes `company_id`.
+- **CLI** — `cmd/create-platform-admin` (bootstrap super-admin); `cmd/create-admin` now takes `--company` slug.
+- **Docs** — rewrote `docs/schema.md` as the multi-tenant source of truth.
+
+### Tests & checks
+- New: middleware company-mismatch/suspended-company/platform-admin gating, platform provisioning + topup + slug validation, `Login` company resolution + suspended block, migration round-trip (opt-in via `MIGRATION_TEST_DB_URL`).
+- Updated all existing tests for the new signatures. `go test ./...` green, `gofmt` clean, `golangci-lint` (v2) 0 issues.
+
+### Notes / follow-ups
+- `AdminLogin` does not yet return `company_slug` or gate suspended companies at login (middleware catches the latter on the next call) — address in Epic 8 routing.
+- Local `golangci-lint` was v1 vs the repo's v2 config; installed v2.1.6 to run the real lint.
+
 ## 2026-06-05 — Epic 4: Settings engine, request controls, OTP rate limiting (Complete)
 
 ### What we did

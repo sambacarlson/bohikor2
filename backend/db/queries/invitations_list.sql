@@ -1,2 +1,2 @@
--- name: ListInvitations :many
-SELECT * FROM invitations ORDER BY sent_at DESC;
+-- name: ListInvitationsByCompany :many
+SELECT * FROM invitations WHERE company_id = $1 ORDER BY sent_at DESC;

@@ -13,11 +13,12 @@ import (
 )
 
 const createPhoneVerification = `-- name: CreatePhoneVerification :one
-INSERT INTO phone_verifications (user_id, phone_number, amount_xaf, status)
-VALUES ($1, $2, $3, $4) RETURNING id, user_id, phone_number, amount_xaf, campay_payout_ref, status, failure_reason, created_at, updated_at, ussd_code
+INSERT INTO phone_verifications (company_id, user_id, phone_number, amount_xaf, status)
+VALUES ($1, $2, $3, $4, $5) RETURNING id, company_id, user_id, phone_number, amount_xaf, campay_payout_ref, status, failure_reason, ussd_code, created_at, updated_at
 `
 
 type CreatePhoneVerificationParams struct {
+	CompanyID   uuid.UUID      `json:"company_id"`
 	UserID      uuid.UUID      `json:"user_id"`
 	PhoneNumber string         `json:"phone_number"`
 	AmountXaf   pgtype.Numeric `json:"amount_xaf"`
@@ -26,6 +27,7 @@ type CreatePhoneVerificationParams struct {
 
 func (q *Queries) CreatePhoneVerification(ctx context.Context, arg CreatePhoneVerificationParams) (PhoneVerification, error) {
 	row := q.db.QueryRow(ctx, createPhoneVerification,
+		arg.CompanyID,
 		arg.UserID,
 		arg.PhoneNumber,
 		arg.AmountXaf,
@@ -34,22 +36,23 @@ func (q *Queries) CreatePhoneVerification(ctx context.Context, arg CreatePhoneVe
 	var i PhoneVerification
 	err := row.Scan(
 		&i.ID,
+		&i.CompanyID,
 		&i.UserID,
 		&i.PhoneNumber,
 		&i.AmountXaf,
 		&i.CampayPayoutRef,
 		&i.Status,
 		&i.FailureReason,
+		&i.UssdCode,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.UssdCode,
 	)
 	return i, err
 }
 
 const getActivePhoneVerificationByUser = `-- name: GetActivePhoneVerificationByUser :one
-SELECT id, user_id, phone_number, amount_xaf, campay_payout_ref, status, failure_reason, created_at, updated_at, ussd_code FROM phone_verifications
-WHERE user_id = $1 AND status IN ('initiated', 'pending')
+SELECT id, company_id, user_id, phone_number, amount_xaf, campay_payout_ref, status, failure_reason, ussd_code, created_at, updated_at FROM phone_verifications
+WHERE user_id = $1 AND status IN ('initiated', 'processing', 'pending')
 ORDER BY created_at DESC LIMIT 1
 `
 
@@ -58,21 +61,22 @@ func (q *Queries) GetActivePhoneVerificationByUser(ctx context.Context, userID u
 	var i PhoneVerification
 	err := row.Scan(
 		&i.ID,
+		&i.CompanyID,
 		&i.UserID,
 		&i.PhoneNumber,
 		&i.AmountXaf,
 		&i.CampayPayoutRef,
 		&i.Status,
 		&i.FailureReason,
+		&i.UssdCode,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.UssdCode,
 	)
 	return i, err
 }
 
 const getLatestPhoneVerificationByUser = `-- name: GetLatestPhoneVerificationByUser :one
-SELECT id, user_id, phone_number, amount_xaf, campay_payout_ref, status, failure_reason, created_at, updated_at, ussd_code FROM phone_verifications
+SELECT id, company_id, user_id, phone_number, amount_xaf, campay_payout_ref, status, failure_reason, ussd_code, created_at, updated_at FROM phone_verifications
 WHERE user_id = $1
 ORDER BY created_at DESC LIMIT 1
 `
@@ -82,37 +86,40 @@ func (q *Queries) GetLatestPhoneVerificationByUser(ctx context.Context, userID u
 	var i PhoneVerification
 	err := row.Scan(
 		&i.ID,
+		&i.CompanyID,
 		&i.UserID,
 		&i.PhoneNumber,
 		&i.AmountXaf,
 		&i.CampayPayoutRef,
 		&i.Status,
 		&i.FailureReason,
+		&i.UssdCode,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.UssdCode,
 	)
 	return i, err
 }
 
 const getPhoneVerificationByCampayRef = `-- name: GetPhoneVerificationByCampayRef :one
-SELECT id, user_id, phone_number, amount_xaf, campay_payout_ref, status, failure_reason, created_at, updated_at, ussd_code FROM phone_verifications WHERE campay_payout_ref = $1
+SELECT id, company_id, user_id, phone_number, amount_xaf, campay_payout_ref, status, failure_reason, ussd_code, created_at, updated_at FROM phone_verifications WHERE campay_payout_ref = $1
 `
 
+// Webhook resolves by Campay reference (globally unique); no company context.
 func (q *Queries) GetPhoneVerificationByCampayRef(ctx context.Context, campayPayoutRef pgtype.Text) (PhoneVerification, error) {
 	row := q.db.QueryRow(ctx, getPhoneVerificationByCampayRef, campayPayoutRef)
 	var i PhoneVerification
 	err := row.Scan(
 		&i.ID,
+		&i.CompanyID,
 		&i.UserID,
 		&i.PhoneNumber,
 		&i.AmountXaf,
 		&i.CampayPayoutRef,
 		&i.Status,
 		&i.FailureReason,
+		&i.UssdCode,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.UssdCode,
 	)
 	return i, err
 }
@@ -124,7 +131,7 @@ UPDATE phone_verifications SET
     campay_payout_ref = $4,
     ussd_code = $5,
     updated_at = NOW()
-WHERE id = $1 RETURNING id, user_id, phone_number, amount_xaf, campay_payout_ref, status, failure_reason, created_at, updated_at, ussd_code
+WHERE id = $1 RETURNING id, company_id, user_id, phone_number, amount_xaf, campay_payout_ref, status, failure_reason, ussd_code, created_at, updated_at
 `
 
 type UpdatePhoneVerificationStatusParams struct {
@@ -146,15 +153,16 @@ func (q *Queries) UpdatePhoneVerificationStatus(ctx context.Context, arg UpdateP
 	var i PhoneVerification
 	err := row.Scan(
 		&i.ID,
+		&i.CompanyID,
 		&i.UserID,
 		&i.PhoneNumber,
 		&i.AmountXaf,
 		&i.CampayPayoutRef,
 		&i.Status,
 		&i.FailureReason,
+		&i.UssdCode,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.UssdCode,
 	)
 	return i, err
 }

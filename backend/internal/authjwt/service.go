@@ -10,11 +10,13 @@ import (
 type TokenClaims struct {
 	SubjectID   string `json:"sub"`
 	SubjectType string `json:"role"`
+	// CompanyID is the tenant the subject belongs to. Empty for platform_admin.
+	CompanyID string `json:"company_id"`
 	jwt.RegisteredClaims
 }
 
 type TokenService interface {
-	GenerateAccessToken(subjectID string, subjectType string) (string, error)
+	GenerateAccessToken(subjectID string, subjectType string, companyID string) (string, error)
 	VerifyAccessToken(tokenString string) (*TokenClaims, error)
 	GenerateRefreshToken() (plain string, hashed string, err error)
 }
@@ -31,11 +33,12 @@ func NewHS256Service(secret string, accessExpiry time.Duration) TokenService {
 	}
 }
 
-func (s *hs256Service) GenerateAccessToken(subjectID string, subjectType string) (string, error) {
+func (s *hs256Service) GenerateAccessToken(subjectID string, subjectType string, companyID string) (string, error) {
 	now := time.Now().UTC()
 	claims := TokenClaims{
 		SubjectID:   subjectID,
 		SubjectType: subjectType,
+		CompanyID:   companyID,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    "bohikor2",
 			IssuedAt:  jwt.NewNumericDate(now),

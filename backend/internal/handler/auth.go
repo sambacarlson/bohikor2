@@ -35,7 +35,10 @@ type AuthHandler struct {
 type authQuerier interface {
 	GetUserByID(ctx context.Context, id uuid.UUID) (db.User, error)
 	GetUserByEmail(ctx context.Context, email string) (db.User, error)
+	GetAdminByID(ctx context.Context, id uuid.UUID) (db.Admin, error)
 	GetAdminByEmail(ctx context.Context, email string) (db.Admin, error)
+	GetCompanyByID(ctx context.Context, id uuid.UUID) (db.Company, error)
+	GetPlatformAdminByEmail(ctx context.Context, email string) (db.PlatformAdmin, error)
 	CreateUser(ctx context.Context, arg db.CreateUserParams) (db.User, error)
 	CreateRefreshToken(ctx context.Context, arg db.CreateRefreshTokenParams) (db.RefreshToken, error)
 	GetRefreshTokenByHash(ctx context.Context, tokenHash string) (db.RefreshToken, error)
@@ -79,8 +82,8 @@ type tokenResponse struct {
 	ExpiresIn    int64  `json:"expires_in"`
 }
 
-func (h *AuthHandler) generateTokenPair(subjectID string, subjectType string) (*tokenResponse, error) {
-	accessToken, err := h.tokenService.GenerateAccessToken(subjectID, subjectType)
+func (h *AuthHandler) generateTokenPair(subjectID string, subjectType string, companyID string) (*tokenResponse, error) {
+	accessToken, err := h.tokenService.GenerateAccessToken(subjectID, subjectType, companyID)
 	if err != nil {
 		return nil, fmt.Errorf("generate access token: %w", err)
 	}
@@ -110,6 +113,29 @@ func (h *AuthHandler) generateTokenPair(subjectID string, subjectType string) (*
 		RefreshToken: plainRefresh,
 		ExpiresIn:    int64(15 * 60),
 	}, nil
+}
+
+// resolveCompanyForSubject returns the company_id claim value for a subject.
+// platform_admin has no company (empty string).
+func (h *AuthHandler) resolveCompanyForSubject(ctx context.Context, subjectType string, subjectID uuid.UUID) (string, error) {
+	switch subjectType {
+	case "user":
+		user, err := h.queries.GetUserByID(ctx, subjectID)
+		if err != nil {
+			return "", err
+		}
+		return user.CompanyID.String(), nil
+	case "admin":
+		admin, err := h.queries.GetAdminByID(ctx, subjectID)
+		if err != nil {
+			return "", err
+		}
+		return admin.CompanyID.String(), nil
+	case "platform_admin":
+		return "", nil
+	default:
+		return "", fmt.Errorf("unknown subject type: %s", subjectType)
+	}
 }
 
 func (h *AuthHandler) Login(c *gin.Context) {
@@ -183,11 +209,22 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
+	// Resolve the company (email is globally unique) for redirect + status gate.
+	company, err := h.queries.GetCompanyByID(c.Request.Context(), user.CompanyID)
+	if err != nil {
+		JSONError(c, http.StatusInternalServerError, "internal_error", "Failed to resolve company")
+		return
+	}
+	if company.Status == db.CompanyStatusSuspended {
+		JSONError(c, http.StatusForbidden, "company_suspended", "Your company account is suspended. Please contact support.")
+		return
+	}
+
 	if _, err := h.queries.ResetLoginAttempts(c.Request.Context(), user.ID); err != nil {
 		slog.Error("reset login attempts", "error", err, "user_id", user.ID)
 	}
 
-	tokens, err := h.generateTokenPair(user.ID.String(), "user")
+	tokens, err := h.generateTokenPair(user.ID.String(), "user", user.CompanyID.String())
 	if err != nil {
 		JSONError(c, http.StatusInternalServerError, "token_failed", "Failed to generate tokens")
 		return
@@ -196,6 +233,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"data": gin.H{
 			"user":          sanitizeUser(user),
+			"company_slug":  company.Slug,
 			"access_token":  tokens.AccessToken,
 			"refresh_token": tokens.RefreshToken,
 			"expires_in":    tokens.ExpiresIn,
@@ -224,6 +262,27 @@ func (h *AuthHandler) CreatePin(c *gin.Context) {
 		return
 	}
 
+	// The invitation is the sole source of the new user's company. Require that
+	// the signup flow has actually verified the OTP (VerifyEmailOTP moves the
+	// invitation to 'accepted') rather than just existing — otherwise anyone who
+	// knows an invited email could call this public endpoint directly and create
+	// the account without ever proving control of the inbox.
+	invitation, err := h.queries.GetActiveInvitationByEmail(c.Request.Context(), req.Email)
+	if err != nil || invitation.Status != db.InvitationStatusAccepted {
+		JSONError(c, http.StatusForbidden, "no_invitation", "No invitation found for this email. Contact your manager.")
+		return
+	}
+
+	company, err := h.queries.GetCompanyByID(c.Request.Context(), invitation.CompanyID)
+	if err != nil {
+		JSONError(c, http.StatusInternalServerError, "internal_error", "Failed to resolve company")
+		return
+	}
+	if company.Status == db.CompanyStatusSuspended {
+		JSONError(c, http.StatusForbidden, "company_suspended", "Your company account is suspended. Please contact support.")
+		return
+	}
+
 	pinHash, err := h.hasher.Hash(req.PIN)
 	if err != nil {
 		JSONError(c, http.StatusInternalServerError, "hash_failed", "Failed to hash PIN")
@@ -231,6 +290,7 @@ func (h *AuthHandler) CreatePin(c *gin.Context) {
 	}
 
 	user, err := h.queries.CreateUser(c.Request.Context(), db.CreateUserParams{
+		CompanyID:     invitation.CompanyID,
 		Email:         req.Email,
 		EmailVerified: true,
 		FullName:      pgtype.Text{Valid: false},
@@ -250,6 +310,7 @@ func (h *AuthHandler) CreatePin(c *gin.Context) {
 
 	metadata, _ := json.Marshal(map[string]string{"source": "mobile"})
 	if _, err := h.queries.CreateEvent(c.Request.Context(), db.CreateEventParams{
+		CompanyID: pgtype.UUID{Bytes: user.CompanyID, Valid: true},
 		UserID:    pgtype.UUID{Bytes: user.ID, Valid: true},
 		EventType: "signup_completed",
 		Metadata:  metadata,
@@ -257,7 +318,7 @@ func (h *AuthHandler) CreatePin(c *gin.Context) {
 		slog.Error("create signup event", "error", err)
 	}
 
-	tokens, err := h.generateTokenPair(user.ID.String(), "user")
+	tokens, err := h.generateTokenPair(user.ID.String(), "user", user.CompanyID.String())
 	if err != nil {
 		JSONError(c, http.StatusInternalServerError, "token_failed", "Failed to generate tokens")
 		return
@@ -411,7 +472,11 @@ func (h *AuthHandler) VerifyEmailOTP(c *gin.Context) {
 
 	storedOTP, err := h.queries.GetEmailOTPByEmail(c.Request.Context(), req.Email)
 	if err != nil {
+		// No OTP on record (never requested, or already expired/consumed). Treat
+		// it the same as a wrong code: record the attempt and return invalid_otp,
+		// so the client always gets a consistent error instead of a silent 200.
 		h.recordOTPFailure(c, req.Email)
+		JSONError(c, http.StatusBadRequest, "invalid_otp", "Invalid OTP code")
 		return
 	}
 
@@ -440,7 +505,17 @@ func (h *AuthHandler) VerifyEmailOTP(c *gin.Context) {
 			return
 		}
 
-		tokens, err := h.generateTokenPair(user.ID.String(), "user")
+		company, err := h.queries.GetCompanyByID(c.Request.Context(), user.CompanyID)
+		if err != nil {
+			JSONError(c, http.StatusInternalServerError, "internal_error", "Failed to resolve company")
+			return
+		}
+		if company.Status == db.CompanyStatusSuspended {
+			JSONError(c, http.StatusForbidden, "company_suspended", "Your company account is suspended. Please contact support.")
+			return
+		}
+
+		tokens, err := h.generateTokenPair(user.ID.String(), "user", user.CompanyID.String())
 		if err != nil {
 			JSONError(c, http.StatusInternalServerError, "token_failed", "Failed to generate tokens")
 			return
@@ -526,28 +601,48 @@ func (h *AuthHandler) resetOTPFailures(c *gin.Context, email string) {
 	}
 }
 
-func (h *AuthHandler) AdminLogin(c *gin.Context) {
+// emailPasswordRequest binds and validates the email/password body shared by
+// AdminLogin and PlatformLogin, writing the 400 response itself on failure.
+func bindEmailPassword(c *gin.Context) (email, password string, ok bool) {
 	var req struct {
 		Email    string `json:"email" binding:"required,email"`
 		Password string `json:"password" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		JSONError(c, http.StatusBadRequest, "invalid_request", "email and password are required")
+		return "", "", false
+	}
+	return req.Email, req.Password, true
+}
+
+func (h *AuthHandler) AdminLogin(c *gin.Context) {
+	email, password, ok := bindEmailPassword(c)
+	if !ok {
 		return
 	}
 
-	admin, err := h.queries.GetAdminByEmail(c.Request.Context(), req.Email)
+	admin, err := h.queries.GetAdminByEmail(c.Request.Context(), email)
 	if err != nil {
 		JSONError(c, http.StatusUnauthorized, "invalid_credentials", "Invalid email or password")
 		return
 	}
 
-	if !h.hasher.Verify(admin.PasswordHash, req.Password) {
+	if !h.hasher.Verify(admin.PasswordHash, password) {
 		JSONError(c, http.StatusUnauthorized, "invalid_credentials", "Invalid email or password")
 		return
 	}
 
-	tokens, err := h.generateTokenPair(admin.ID.String(), "admin")
+	company, err := h.queries.GetCompanyByID(c.Request.Context(), admin.CompanyID)
+	if err != nil {
+		JSONError(c, http.StatusInternalServerError, "internal_error", "Failed to resolve company")
+		return
+	}
+	if company.Status == db.CompanyStatusSuspended {
+		JSONError(c, http.StatusForbidden, "company_suspended", "Your company account is suspended. Please contact support.")
+		return
+	}
+
+	tokens, err := h.generateTokenPair(admin.ID.String(), "admin", admin.CompanyID.String())
 	if err != nil {
 		JSONError(c, http.StatusInternalServerError, "token_failed", "Failed to generate tokens")
 		return
@@ -555,10 +650,44 @@ func (h *AuthHandler) AdminLogin(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"data": gin.H{
-			"admin":         admin,
+			"admin":         sanitizeAdmin(admin),
 			"access_token":  tokens.AccessToken,
 			"refresh_token": tokens.RefreshToken,
 			"expires_in":    tokens.ExpiresIn,
+		},
+	})
+}
+
+func (h *AuthHandler) PlatformLogin(c *gin.Context) {
+	email, password, ok := bindEmailPassword(c)
+	if !ok {
+		return
+	}
+
+	pa, err := h.queries.GetPlatformAdminByEmail(c.Request.Context(), email)
+	if err != nil {
+		JSONError(c, http.StatusUnauthorized, "invalid_credentials", "Invalid email or password")
+		return
+	}
+
+	if !h.hasher.Verify(pa.PasswordHash, password) {
+		JSONError(c, http.StatusUnauthorized, "invalid_credentials", "Invalid email or password")
+		return
+	}
+
+	// Platform admins have no company; company_id claim is empty.
+	tokens, err := h.generateTokenPair(pa.ID.String(), "platform_admin", "")
+	if err != nil {
+		JSONError(c, http.StatusInternalServerError, "token_failed", "Failed to generate tokens")
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"data": gin.H{
+			"platform_admin": gin.H{"id": pa.ID, "email": pa.Email},
+			"access_token":   tokens.AccessToken,
+			"refresh_token":  tokens.RefreshToken,
+			"expires_in":     tokens.ExpiresIn,
 		},
 	})
 }
@@ -581,7 +710,15 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 
 	_ = h.queries.RevokeRefreshToken(c.Request.Context(), tokenHash)
 
-	tokens, err := h.generateTokenPair(stored.SubjectID.String(), stored.SubjectType)
+	// Re-derive the company from the subject on every refresh so a reassignment
+	// (or company suspension) is reflected in the new access token.
+	companyID, err := h.resolveCompanyForSubject(c.Request.Context(), stored.SubjectType, stored.SubjectID)
+	if err != nil {
+		JSONError(c, http.StatusUnauthorized, "invalid_refresh_token", "Subject no longer exists")
+		return
+	}
+
+	tokens, err := h.generateTokenPair(stored.SubjectID.String(), stored.SubjectType, companyID)
 	if err != nil {
 		JSONError(c, http.StatusInternalServerError, "token_failed", "Failed to generate tokens")
 		return
@@ -647,6 +784,16 @@ func generateOTP() (string, error) {
 		return "", fmt.Errorf("generate random OTP: %w", err)
 	}
 	return fmt.Sprintf("%06d", n.Int64()), nil
+}
+
+// sanitizeAdmin strips PasswordHash before an admin record goes into a response body.
+func sanitizeAdmin(admin db.Admin) gin.H {
+	return gin.H{
+		"id":         admin.ID,
+		"company_id": admin.CompanyID,
+		"email":      admin.Email,
+		"created_at": admin.CreatedAt,
+	}
 }
 
 func sanitizeUser(user db.User) gin.H {

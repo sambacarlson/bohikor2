@@ -66,7 +66,7 @@ func TestJWTAuth_InvalidToken(t *testing.T) {
 
 func TestJWTAuth_ExpiredToken(t *testing.T) {
 	svc := authjwt.NewHS256Service("test-secret", -1*time.Second)
-	token, _ := svc.GenerateAccessToken("test-user-id", "user")
+	token, _ := svc.GenerateAccessToken("test-user-id", "user", "")
 	r := setupTestRouter(svc)
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequestWithContext(context.Background(), "GET", "/protected", nil)
@@ -88,7 +88,7 @@ func TestJWTAuth_ExpiredToken(t *testing.T) {
 
 func TestJWTAuth_ValidToken(t *testing.T) {
 	svc := authjwt.NewHS256Service("test-secret", 15*time.Minute)
-	token, _ := svc.GenerateAccessToken("test-user-id", "user")
+	token, _ := svc.GenerateAccessToken("test-user-id", "user", "")
 	r := setupTestRouter(svc)
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequestWithContext(context.Background(), "GET", "/protected", nil)
@@ -113,7 +113,7 @@ func TestJWTAuth_ValidToken(t *testing.T) {
 
 func TestJWTAdmin_TokenType(t *testing.T) {
 	svc := authjwt.NewHS256Service("test-secret", 15*time.Minute)
-	token, _ := svc.GenerateAccessToken("test-admin-id", "admin")
+	token, _ := svc.GenerateAccessToken("test-admin-id", "admin", "")
 	r := setupTestRouter(svc)
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequestWithContext(context.Background(), "GET", "/protected", nil)

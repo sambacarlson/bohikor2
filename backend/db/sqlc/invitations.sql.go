@@ -9,12 +9,13 @@ import (
 	"context"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const acceptInvitation = `-- name: AcceptInvitation :one
 UPDATE invitations SET status = 'accepted', accepted_at = NOW(), updated_at = NOW()
-WHERE email = $1 RETURNING id, email, status, invited_by, sent_at, accepted_at, updated_at
+WHERE email = $1 RETURNING id, company_id, email, status, invited_by, sent_at, accepted_at, updated_at
 `
 
 func (q *Queries) AcceptInvitation(ctx context.Context, email string) (Invitation, error) {
@@ -22,6 +23,7 @@ func (q *Queries) AcceptInvitation(ctx context.Context, email string) (Invitatio
 	var i Invitation
 	err := row.Scan(
 		&i.ID,
+		&i.CompanyID,
 		&i.Email,
 		&i.Status,
 		&i.InvitedBy,
@@ -33,21 +35,28 @@ func (q *Queries) AcceptInvitation(ctx context.Context, email string) (Invitatio
 }
 
 const createInvitation = `-- name: CreateInvitation :one
-INSERT INTO invitations (email, invited_by, sent_at)
-VALUES ($1, $2, $3) RETURNING id, email, status, invited_by, sent_at, accepted_at, updated_at
+INSERT INTO invitations (company_id, email, invited_by, sent_at)
+VALUES ($1, $2, $3, $4) RETURNING id, company_id, email, status, invited_by, sent_at, accepted_at, updated_at
 `
 
 type CreateInvitationParams struct {
+	CompanyID uuid.UUID   `json:"company_id"`
 	Email     string      `json:"email"`
 	InvitedBy pgtype.UUID `json:"invited_by"`
 	SentAt    time.Time   `json:"sent_at"`
 }
 
 func (q *Queries) CreateInvitation(ctx context.Context, arg CreateInvitationParams) (Invitation, error) {
-	row := q.db.QueryRow(ctx, createInvitation, arg.Email, arg.InvitedBy, arg.SentAt)
+	row := q.db.QueryRow(ctx, createInvitation,
+		arg.CompanyID,
+		arg.Email,
+		arg.InvitedBy,
+		arg.SentAt,
+	)
 	var i Invitation
 	err := row.Scan(
 		&i.ID,
+		&i.CompanyID,
 		&i.Email,
 		&i.Status,
 		&i.InvitedBy,
@@ -59,14 +68,16 @@ func (q *Queries) CreateInvitation(ctx context.Context, arg CreateInvitationPara
 }
 
 const getInvitationByEmail = `-- name: GetInvitationByEmail :one
-SELECT id, email, status, invited_by, sent_at, accepted_at, updated_at FROM invitations WHERE email = $1 LIMIT 1
+SELECT id, company_id, email, status, invited_by, sent_at, accepted_at, updated_at FROM invitations WHERE email = $1 LIMIT 1
 `
 
+// Email is globally unique; returns company_id (used by signup to scope the new user).
 func (q *Queries) GetInvitationByEmail(ctx context.Context, email string) (Invitation, error) {
 	row := q.db.QueryRow(ctx, getInvitationByEmail, email)
 	var i Invitation
 	err := row.Scan(
 		&i.ID,
+		&i.CompanyID,
 		&i.Email,
 		&i.Status,
 		&i.InvitedBy,

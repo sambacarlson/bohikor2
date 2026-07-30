@@ -3,12 +3,14 @@ package authjwt
 import (
 	"testing"
 	"time"
+
+	"github.com/golang-jwt/jwt/v4"
 )
 
 func TestGenerateAndVerifyAccessToken(t *testing.T) {
 	svc := NewHS256Service("test-secret-key-that-is-long-enough", 15*time.Minute)
 
-	token, err := svc.GenerateAccessToken("user-uuid-123", "user")
+	token, err := svc.GenerateAccessToken("user-uuid-123", "user", "")
 	if err != nil {
 		t.Fatalf("GenerateAccessToken: %v", err)
 	}
@@ -34,7 +36,7 @@ func TestGenerateAndVerifyAccessToken(t *testing.T) {
 func TestVerifyAccessToken_Expired(t *testing.T) {
 	svc := NewHS256Service("test-secret-key-that-is-long-enough", -1*time.Second)
 
-	token, err := svc.GenerateAccessToken("user-uuid-123", "user")
+	token, err := svc.GenerateAccessToken("user-uuid-123", "user", "")
 	if err != nil {
 		t.Fatalf("GenerateAccessToken: %v", err)
 	}
@@ -49,7 +51,7 @@ func TestVerifyAccessToken_WrongSecret(t *testing.T) {
 	svc1 := NewHS256Service("secret-one", 15*time.Minute)
 	svc2 := NewHS256Service("secret-two", 15*time.Minute)
 
-	token, err := svc1.GenerateAccessToken("user-uuid-123", "user")
+	token, err := svc1.GenerateAccessToken("user-uuid-123", "user", "")
 	if err != nil {
 		t.Fatalf("GenerateAccessToken: %v", err)
 	}
@@ -102,5 +104,22 @@ func TestHashTokenStr_Deterministic(t *testing.T) {
 	h3 := HashTokenStr("world")
 	if h1 == h3 {
 		t.Fatal("different inputs should produce different hashes")
+	}
+}
+
+// A token signed with the "none" algorithm must be rejected by the HMAC-only
+// verifier (defends against alg-confusion).
+func TestVerifyAccessToken_UnexpectedSigningMethod(t *testing.T) {
+	svc := NewHS256Service("test-secret-key-that-is-long-enough", 15*time.Minute)
+
+	claims := TokenClaims{SubjectID: "u1", SubjectType: "user"}
+	tok := jwt.NewWithClaims(jwt.SigningMethodNone, claims)
+	signed, err := tok.SignedString(jwt.UnsafeAllowNoneSignatureType)
+	if err != nil {
+		t.Fatalf("sign none-alg token: %v", err)
+	}
+
+	if _, err := svc.VerifyAccessToken(signed); err == nil {
+		t.Fatal("expected verification to reject a none-alg token")
 	}
 }

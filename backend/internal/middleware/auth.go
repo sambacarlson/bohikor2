@@ -37,6 +37,7 @@ func JWTAuth(verifier authjwt.TokenService) gin.HandlerFunc {
 
 		c.Set("subject_id", claims.SubjectID)
 		c.Set("subject_type", claims.SubjectType)
+		c.Set("claim_company_id", claims.CompanyID)
 		c.Next()
 	}
 }

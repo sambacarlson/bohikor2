@@ -62,13 +62,18 @@ func coerceValue(key string, raw json.RawMessage) json.RawMessage {
 }
 
 type settingsQuerier interface {
-	ListSettings(ctx context.Context) ([]db.Setting, error)
+	ListSettingsByCompany(ctx context.Context, companyID uuid.UUID) ([]db.Setting, error)
 	UpsertSetting(ctx context.Context, arg db.UpsertSettingParams) (db.Setting, error)
 }
 
 func HandleListSettings(q settingsQuerier) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		settings, err := q.ListSettings(c.Request.Context())
+		companyID, ok := companyIDFromContext(c)
+		if !ok {
+			return
+		}
+
+		settings, err := q.ListSettingsByCompany(c.Request.Context(), companyID)
 		if err != nil {
 			slog.Error("list settings", "error", err)
 			JSONError(c, http.StatusInternalServerError, "internal_error", "failed to list settings")
@@ -103,6 +108,11 @@ func HandleListSettings(q settingsQuerier) gin.HandlerFunc {
 
 func HandleUpdateSettings(q settingsQuerier) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		companyID, ok := companyIDFromContext(c)
+		if !ok {
+			return
+		}
+
 		adminIDStr := c.GetString("admin_id")
 		if adminIDStr == "" {
 			JSONError(c, http.StatusUnauthorized, "unauthorized", "admin not authenticated")
@@ -124,6 +134,7 @@ func HandleUpdateSettings(q settingsQuerier) gin.HandlerFunc {
 		for key, value := range rawSettings {
 			coerced := coerceValue(key, value)
 			updated, err := q.UpsertSetting(c.Request.Context(), db.UpsertSettingParams{
+				CompanyID: companyID,
 				Key:       key,
 				Value:     coerced,
 				UpdatedBy: pgtype.UUID{Bytes: adminID, Valid: true},

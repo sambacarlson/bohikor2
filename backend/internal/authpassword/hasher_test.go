@@ -43,3 +43,14 @@ func TestHash_DifferentEachTime(t *testing.T) {
 		t.Fatal("second hash should verify")
 	}
 }
+
+// bcrypt rejects passwords longer than 72 bytes, exercising Hash's error path.
+func TestHash_TooLongPasswordErrors(t *testing.T) {
+	long := make([]byte, 100)
+	for i := range long {
+		long[i] = 'a'
+	}
+	if _, err := NewBcryptHasher().Hash(string(long)); err == nil {
+		t.Fatal("expected an error hashing a >72 byte password")
+	}
+}

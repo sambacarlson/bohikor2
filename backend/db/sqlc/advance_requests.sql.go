@@ -7,6 +7,7 @@ package db
 
 import (
 	"context"
+	"database/sql"
 	"time"
 
 	"github.com/google/uuid"
@@ -39,27 +40,38 @@ func (q *Queries) CountSuccessfulAdvanceRequestsByUserThisMonth(ctx context.Cont
 }
 
 const createAdvanceRequest = `-- name: CreateAdvanceRequest :one
-INSERT INTO advance_requests (user_id, amount_xaf, status)
-VALUES ($1, $2, $3) RETURNING id, user_id, amount_xaf, status, campay_payout_ref, failure_reason, payout_duration_seconds, created_at, updated_at
+INSERT INTO advance_requests (company_id, user_id, amount_xaf, status)
+VALUES ($1, $2, $3, $4) RETURNING id, company_id, user_id, amount_xaf, status, campay_payout_ref, failure_reason, payout_duration_seconds, attempt_count, last_reconciled_at, next_retry_at, needs_admin_review, created_at, updated_at
 `
 
 type CreateAdvanceRequestParams struct {
+	CompanyID uuid.UUID      `json:"company_id"`
 	UserID    uuid.UUID      `json:"user_id"`
 	AmountXaf pgtype.Numeric `json:"amount_xaf"`
 	Status    RequestStatus  `json:"status"`
 }
 
 func (q *Queries) CreateAdvanceRequest(ctx context.Context, arg CreateAdvanceRequestParams) (AdvanceRequest, error) {
-	row := q.db.QueryRow(ctx, createAdvanceRequest, arg.UserID, arg.AmountXaf, arg.Status)
+	row := q.db.QueryRow(ctx, createAdvanceRequest,
+		arg.CompanyID,
+		arg.UserID,
+		arg.AmountXaf,
+		arg.Status,
+	)
 	var i AdvanceRequest
 	err := row.Scan(
 		&i.ID,
+		&i.CompanyID,
 		&i.UserID,
 		&i.AmountXaf,
 		&i.Status,
 		&i.CampayPayoutRef,
 		&i.FailureReason,
 		&i.PayoutDurationSeconds,
+		&i.AttemptCount,
+		&i.LastReconciledAt,
+		&i.NextRetryAt,
+		&i.NeedsAdminReview,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -67,8 +79,8 @@ func (q *Queries) CreateAdvanceRequest(ctx context.Context, arg CreateAdvanceReq
 }
 
 const getActiveRequestByUserID = `-- name: GetActiveRequestByUserID :one
-SELECT id, user_id, amount_xaf, status, campay_payout_ref, failure_reason, payout_duration_seconds, created_at, updated_at FROM advance_requests
-WHERE user_id = $1 AND status IN ('initiated', 'pending')
+SELECT id, company_id, user_id, amount_xaf, status, campay_payout_ref, failure_reason, payout_duration_seconds, attempt_count, last_reconciled_at, next_retry_at, needs_admin_review, created_at, updated_at FROM advance_requests
+WHERE user_id = $1 AND status IN ('initiated', 'processing', 'pending')
 LIMIT 1
 `
 
@@ -77,12 +89,17 @@ func (q *Queries) GetActiveRequestByUserID(ctx context.Context, userID uuid.UUID
 	var i AdvanceRequest
 	err := row.Scan(
 		&i.ID,
+		&i.CompanyID,
 		&i.UserID,
 		&i.AmountXaf,
 		&i.Status,
 		&i.CampayPayoutRef,
 		&i.FailureReason,
 		&i.PayoutDurationSeconds,
+		&i.AttemptCount,
+		&i.LastReconciledAt,
+		&i.NextRetryAt,
+		&i.NeedsAdminReview,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -90,20 +107,26 @@ func (q *Queries) GetActiveRequestByUserID(ctx context.Context, userID uuid.UUID
 }
 
 const getAdvanceRequestByCampayRef = `-- name: GetAdvanceRequestByCampayRef :one
-SELECT id, user_id, amount_xaf, status, campay_payout_ref, failure_reason, payout_duration_seconds, created_at, updated_at FROM advance_requests WHERE campay_payout_ref = $1
+SELECT id, company_id, user_id, amount_xaf, status, campay_payout_ref, failure_reason, payout_duration_seconds, attempt_count, last_reconciled_at, next_retry_at, needs_admin_review, created_at, updated_at FROM advance_requests WHERE campay_payout_ref = $1
 `
 
+// Webhook resolves by Campay reference (globally unique); no company context.
 func (q *Queries) GetAdvanceRequestByCampayRef(ctx context.Context, campayPayoutRef pgtype.Text) (AdvanceRequest, error) {
 	row := q.db.QueryRow(ctx, getAdvanceRequestByCampayRef, campayPayoutRef)
 	var i AdvanceRequest
 	err := row.Scan(
 		&i.ID,
+		&i.CompanyID,
 		&i.UserID,
 		&i.AmountXaf,
 		&i.Status,
 		&i.CampayPayoutRef,
 		&i.FailureReason,
 		&i.PayoutDurationSeconds,
+		&i.AttemptCount,
+		&i.LastReconciledAt,
+		&i.NextRetryAt,
+		&i.NeedsAdminReview,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -111,7 +134,7 @@ func (q *Queries) GetAdvanceRequestByCampayRef(ctx context.Context, campayPayout
 }
 
 const getAdvanceRequestByID = `-- name: GetAdvanceRequestByID :one
-SELECT id, user_id, amount_xaf, status, campay_payout_ref, failure_reason, payout_duration_seconds, created_at, updated_at FROM advance_requests WHERE id = $1
+SELECT id, company_id, user_id, amount_xaf, status, campay_payout_ref, failure_reason, payout_duration_seconds, attempt_count, last_reconciled_at, next_retry_at, needs_admin_review, created_at, updated_at FROM advance_requests WHERE id = $1
 `
 
 func (q *Queries) GetAdvanceRequestByID(ctx context.Context, id uuid.UUID) (AdvanceRequest, error) {
@@ -119,61 +142,25 @@ func (q *Queries) GetAdvanceRequestByID(ctx context.Context, id uuid.UUID) (Adva
 	var i AdvanceRequest
 	err := row.Scan(
 		&i.ID,
+		&i.CompanyID,
 		&i.UserID,
 		&i.AmountXaf,
 		&i.Status,
 		&i.CampayPayoutRef,
 		&i.FailureReason,
 		&i.PayoutDurationSeconds,
+		&i.AttemptCount,
+		&i.LastReconciledAt,
+		&i.NextRetryAt,
+		&i.NeedsAdminReview,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
 	return i, err
 }
 
-const listAdvanceRequests = `-- name: ListAdvanceRequests :many
-SELECT id, user_id, amount_xaf, status, campay_payout_ref, failure_reason, payout_duration_seconds, created_at, updated_at FROM advance_requests
-ORDER BY created_at DESC
-LIMIT $1 OFFSET $2
-`
-
-type ListAdvanceRequestsParams struct {
-	Limit  int32 `json:"limit"`
-	Offset int32 `json:"offset"`
-}
-
-func (q *Queries) ListAdvanceRequests(ctx context.Context, arg ListAdvanceRequestsParams) ([]AdvanceRequest, error) {
-	rows, err := q.db.Query(ctx, listAdvanceRequests, arg.Limit, arg.Offset)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []AdvanceRequest
-	for rows.Next() {
-		var i AdvanceRequest
-		if err := rows.Scan(
-			&i.ID,
-			&i.UserID,
-			&i.AmountXaf,
-			&i.Status,
-			&i.CampayPayoutRef,
-			&i.FailureReason,
-			&i.PayoutDurationSeconds,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listAdvanceRequestsByUserID = `-- name: ListAdvanceRequestsByUserID :many
-SELECT id, user_id, amount_xaf, status, campay_payout_ref, failure_reason, payout_duration_seconds, created_at, updated_at FROM advance_requests
+SELECT id, company_id, user_id, amount_xaf, status, campay_payout_ref, failure_reason, payout_duration_seconds, attempt_count, last_reconciled_at, next_retry_at, needs_admin_review, created_at, updated_at FROM advance_requests
 WHERE user_id = $1
 ORDER BY created_at DESC
 `
@@ -189,12 +176,17 @@ func (q *Queries) ListAdvanceRequestsByUserID(ctx context.Context, userID uuid.U
 		var i AdvanceRequest
 		if err := rows.Scan(
 			&i.ID,
+			&i.CompanyID,
 			&i.UserID,
 			&i.AmountXaf,
 			&i.Status,
 			&i.CampayPayoutRef,
 			&i.FailureReason,
 			&i.PayoutDurationSeconds,
+			&i.AttemptCount,
+			&i.LastReconciledAt,
+			&i.NextRetryAt,
+			&i.NeedsAdminReview,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -208,49 +200,61 @@ func (q *Queries) ListAdvanceRequestsByUserID(ctx context.Context, userID uuid.U
 	return items, nil
 }
 
-const listAdvanceRequestsWithUser = `-- name: ListAdvanceRequestsWithUser :many
-SELECT ar.id, ar.user_id, ar.amount_xaf, ar.status, ar.campay_payout_ref, ar.failure_reason, ar.payout_duration_seconds, ar.created_at, ar.updated_at, u.email AS user_email
+const listAdvanceRequestsWithUserByCompany = `-- name: ListAdvanceRequestsWithUserByCompany :many
+SELECT ar.id, ar.company_id, ar.user_id, ar.amount_xaf, ar.status, ar.campay_payout_ref, ar.failure_reason, ar.payout_duration_seconds, ar.attempt_count, ar.last_reconciled_at, ar.next_retry_at, ar.needs_admin_review, ar.created_at, ar.updated_at, u.email AS user_email
 FROM advance_requests ar
 JOIN users u ON ar.user_id = u.id
+WHERE ar.company_id = $1
 ORDER BY ar.created_at DESC
-LIMIT $1 OFFSET $2
+LIMIT $2 OFFSET $3
 `
 
-type ListAdvanceRequestsWithUserParams struct {
-	Limit  int32 `json:"limit"`
-	Offset int32 `json:"offset"`
+type ListAdvanceRequestsWithUserByCompanyParams struct {
+	CompanyID uuid.UUID `json:"company_id"`
+	Limit     int32     `json:"limit"`
+	Offset    int32     `json:"offset"`
 }
 
-type ListAdvanceRequestsWithUserRow struct {
+type ListAdvanceRequestsWithUserByCompanyRow struct {
 	ID                    uuid.UUID      `json:"id"`
+	CompanyID             uuid.UUID      `json:"company_id"`
 	UserID                uuid.UUID      `json:"user_id"`
 	AmountXaf             pgtype.Numeric `json:"amount_xaf"`
 	Status                RequestStatus  `json:"status"`
 	CampayPayoutRef       pgtype.Text    `json:"campay_payout_ref"`
 	FailureReason         pgtype.Text    `json:"failure_reason"`
 	PayoutDurationSeconds pgtype.Int4    `json:"payout_duration_seconds"`
+	AttemptCount          int32          `json:"attempt_count"`
+	LastReconciledAt      sql.NullTime   `json:"last_reconciled_at"`
+	NextRetryAt           sql.NullTime   `json:"next_retry_at"`
+	NeedsAdminReview      bool           `json:"needs_admin_review"`
 	CreatedAt             time.Time      `json:"created_at"`
 	UpdatedAt             time.Time      `json:"updated_at"`
 	UserEmail             string         `json:"user_email"`
 }
 
-func (q *Queries) ListAdvanceRequestsWithUser(ctx context.Context, arg ListAdvanceRequestsWithUserParams) ([]ListAdvanceRequestsWithUserRow, error) {
-	rows, err := q.db.Query(ctx, listAdvanceRequestsWithUser, arg.Limit, arg.Offset)
+func (q *Queries) ListAdvanceRequestsWithUserByCompany(ctx context.Context, arg ListAdvanceRequestsWithUserByCompanyParams) ([]ListAdvanceRequestsWithUserByCompanyRow, error) {
+	rows, err := q.db.Query(ctx, listAdvanceRequestsWithUserByCompany, arg.CompanyID, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListAdvanceRequestsWithUserRow
+	var items []ListAdvanceRequestsWithUserByCompanyRow
 	for rows.Next() {
-		var i ListAdvanceRequestsWithUserRow
+		var i ListAdvanceRequestsWithUserByCompanyRow
 		if err := rows.Scan(
 			&i.ID,
+			&i.CompanyID,
 			&i.UserID,
 			&i.AmountXaf,
 			&i.Status,
 			&i.CampayPayoutRef,
 			&i.FailureReason,
 			&i.PayoutDurationSeconds,
+			&i.AttemptCount,
+			&i.LastReconciledAt,
+			&i.NextRetryAt,
+			&i.NeedsAdminReview,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.UserEmail,
@@ -272,7 +276,7 @@ UPDATE advance_requests SET
     payout_duration_seconds = $4,
     campay_payout_ref = $5,
     updated_at = NOW()
-WHERE id = $1 RETURNING id, user_id, amount_xaf, status, campay_payout_ref, failure_reason, payout_duration_seconds, created_at, updated_at
+WHERE id = $1 RETURNING id, company_id, user_id, amount_xaf, status, campay_payout_ref, failure_reason, payout_duration_seconds, attempt_count, last_reconciled_at, next_retry_at, needs_admin_review, created_at, updated_at
 `
 
 type UpdateAdvanceRequestStatusParams struct {
@@ -294,12 +298,17 @@ func (q *Queries) UpdateAdvanceRequestStatus(ctx context.Context, arg UpdateAdva
 	var i AdvanceRequest
 	err := row.Scan(
 		&i.ID,
+		&i.CompanyID,
 		&i.UserID,
 		&i.AmountXaf,
 		&i.Status,
 		&i.CampayPayoutRef,
 		&i.FailureReason,
 		&i.PayoutDurationSeconds,
+		&i.AttemptCount,
+		&i.LastReconciledAt,
+		&i.NextRetryAt,
+		&i.NeedsAdminReview,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

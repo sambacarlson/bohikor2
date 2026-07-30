@@ -98,6 +98,7 @@ func New(cfg *config.Config) (*Server, error) {
 		authGroup.POST("/create-pin", authHandler.CreatePin)
 		authGroup.POST("/forgot-pin", authHandler.ForgotPin)
 		authGroup.POST("/admin/login", authHandler.AdminLogin)
+		authGroup.POST("/platform/login", authHandler.PlatformLogin)
 		authGroup.POST("/refresh", authHandler.RefreshToken)
 	}
 
@@ -117,6 +118,19 @@ func New(cfg *config.Config) (*Server, error) {
 		adminGroup.GET("/users", handler.HandleListUsers(queries))
 		adminGroup.PUT("/users/:id/unlock", handler.HandleUnlockUser(queries))
 		adminGroup.GET("/events", handler.HandleListEvents(queries))
+	}
+
+	platformHandler := handler.NewPlatformHandler(handler.NewRealPlatformStore(queries, pool), hasher)
+	platformGroup := router.Group("/api/platform")
+	platformGroup.Use(authMiddleware)
+	platformGroup.Use(middleware.RequirePlatformAdmin(queries))
+	{
+		platformGroup.POST("/companies", platformHandler.CreateCompany)
+		platformGroup.GET("/companies", platformHandler.ListCompanies)
+		platformGroup.GET("/companies/:id", platformHandler.GetCompany)
+		platformGroup.PUT("/companies/:id/status", platformHandler.UpdateCompanyStatus)
+		platformGroup.POST("/companies/:id/admins", platformHandler.CreateCompanyAdmin)
+		platformGroup.POST("/companies/:id/ledger/topup", platformHandler.TopUpCompany)
 	}
 
 	userGroup := router.Group("/api/users")

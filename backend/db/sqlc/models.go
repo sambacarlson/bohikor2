@@ -15,6 +15,48 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type CompanyStatus string
+
+const (
+	CompanyStatusActive    CompanyStatus = "active"
+	CompanyStatusSuspended CompanyStatus = "suspended"
+)
+
+func (e *CompanyStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = CompanyStatus(s)
+	case string:
+		*e = CompanyStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for CompanyStatus: %T", src)
+	}
+	return nil
+}
+
+type NullCompanyStatus struct {
+	CompanyStatus CompanyStatus `json:"company_status"`
+	Valid         bool          `json:"valid"` // Valid is true if CompanyStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullCompanyStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.CompanyStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.CompanyStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullCompanyStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.CompanyStatus), nil
+}
+
 type InvitationStatus string
 
 const (
@@ -63,10 +105,11 @@ func (ns NullInvitationStatus) Value() (driver.Value, error) {
 type RequestStatus string
 
 const (
-	RequestStatusInitiated RequestStatus = "initiated"
-	RequestStatusPending   RequestStatus = "pending"
-	RequestStatusSuccess   RequestStatus = "success"
-	RequestStatusFailed    RequestStatus = "failed"
+	RequestStatusInitiated  RequestStatus = "initiated"
+	RequestStatusProcessing RequestStatus = "processing"
+	RequestStatusPending    RequestStatus = "pending"
+	RequestStatusSuccess    RequestStatus = "success"
+	RequestStatusFailed     RequestStatus = "failed"
 )
 
 func (e *RequestStatus) Scan(src interface{}) error {
@@ -149,21 +192,48 @@ func (ns NullUserStatus) Value() (driver.Value, error) {
 
 type Admin struct {
 	ID           uuid.UUID `json:"id"`
+	CompanyID    uuid.UUID `json:"company_id"`
 	Email        string    `json:"email"`
-	CreatedAt    time.Time `json:"created_at"`
 	PasswordHash string    `json:"password_hash"`
+	CreatedAt    time.Time `json:"created_at"`
 }
 
 type AdvanceRequest struct {
 	ID                    uuid.UUID      `json:"id"`
+	CompanyID             uuid.UUID      `json:"company_id"`
 	UserID                uuid.UUID      `json:"user_id"`
 	AmountXaf             pgtype.Numeric `json:"amount_xaf"`
 	Status                RequestStatus  `json:"status"`
 	CampayPayoutRef       pgtype.Text    `json:"campay_payout_ref"`
 	FailureReason         pgtype.Text    `json:"failure_reason"`
 	PayoutDurationSeconds pgtype.Int4    `json:"payout_duration_seconds"`
+	AttemptCount          int32          `json:"attempt_count"`
+	LastReconciledAt      sql.NullTime   `json:"last_reconciled_at"`
+	NextRetryAt           sql.NullTime   `json:"next_retry_at"`
+	NeedsAdminReview      bool           `json:"needs_admin_review"`
 	CreatedAt             time.Time      `json:"created_at"`
 	UpdatedAt             time.Time      `json:"updated_at"`
+}
+
+type Company struct {
+	ID        uuid.UUID     `json:"id"`
+	Slug      string        `json:"slug"`
+	Name      string        `json:"name"`
+	Status    CompanyStatus `json:"status"`
+	CreatedBy pgtype.UUID   `json:"created_by"`
+	CreatedAt time.Time     `json:"created_at"`
+	UpdatedAt time.Time     `json:"updated_at"`
+}
+
+type CompanyLedger struct {
+	ID               uuid.UUID      `json:"id"`
+	CompanyID        uuid.UUID      `json:"company_id"`
+	EntryType        string         `json:"entry_type"`
+	AmountXaf        pgtype.Numeric `json:"amount_xaf"`
+	AdvanceRequestID pgtype.UUID    `json:"advance_request_id"`
+	CreatedBy        pgtype.UUID    `json:"created_by"`
+	Note             pgtype.Text    `json:"note"`
+	CreatedAt        time.Time      `json:"created_at"`
 }
 
 type EmailOtp struct {
@@ -186,6 +256,7 @@ type EmailOtpFailure struct {
 
 type Event struct {
 	ID        uuid.UUID   `json:"id"`
+	CompanyID pgtype.UUID `json:"company_id"`
 	UserID    pgtype.UUID `json:"user_id"`
 	AdminID   pgtype.UUID `json:"admin_id"`
 	EventType string      `json:"event_type"`
@@ -195,6 +266,7 @@ type Event struct {
 
 type Invitation struct {
 	ID         uuid.UUID        `json:"id"`
+	CompanyID  uuid.UUID        `json:"company_id"`
 	Email      string           `json:"email"`
 	Status     InvitationStatus `json:"status"`
 	InvitedBy  pgtype.UUID      `json:"invited_by"`
@@ -205,15 +277,23 @@ type Invitation struct {
 
 type PhoneVerification struct {
 	ID              uuid.UUID      `json:"id"`
+	CompanyID       uuid.UUID      `json:"company_id"`
 	UserID          uuid.UUID      `json:"user_id"`
 	PhoneNumber     string         `json:"phone_number"`
 	AmountXaf       pgtype.Numeric `json:"amount_xaf"`
 	CampayPayoutRef pgtype.Text    `json:"campay_payout_ref"`
 	Status          RequestStatus  `json:"status"`
 	FailureReason   pgtype.Text    `json:"failure_reason"`
+	UssdCode        pgtype.Text    `json:"ussd_code"`
 	CreatedAt       time.Time      `json:"created_at"`
 	UpdatedAt       time.Time      `json:"updated_at"`
-	UssdCode        pgtype.Text    `json:"ussd_code"`
+}
+
+type PlatformAdmin struct {
+	ID           uuid.UUID `json:"id"`
+	Email        string    `json:"email"`
+	PasswordHash string    `json:"password_hash"`
+	CreatedAt    time.Time `json:"created_at"`
 }
 
 type RefreshToken struct {
@@ -226,6 +306,7 @@ type RefreshToken struct {
 }
 
 type Setting struct {
+	CompanyID uuid.UUID   `json:"company_id"`
 	Key       string      `json:"key"`
 	Value     []byte      `json:"value"`
 	UpdatedAt time.Time   `json:"updated_at"`
@@ -234,11 +315,15 @@ type Setting struct {
 
 type User struct {
 	ID                  uuid.UUID    `json:"id"`
+	CompanyID           uuid.UUID    `json:"company_id"`
 	Email               string       `json:"email"`
 	EmailVerified       bool         `json:"email_verified"`
 	FullName            pgtype.Text  `json:"full_name"`
 	PhoneNumber         pgtype.Text  `json:"phone_number"`
 	PhoneVerified       bool         `json:"phone_verified"`
+	PinHash             pgtype.Text  `json:"pin_hash"`
+	FailedLoginAttempts int32        `json:"failed_login_attempts"`
+	LockedUntil         sql.NullTime `json:"locked_until"`
 	Status              UserStatus   `json:"status"`
 	IsTermsAccepted     bool         `json:"is_terms_accepted"`
 	TermsAcceptedAt     sql.NullTime `json:"terms_accepted_at"`
@@ -246,7 +331,4 @@ type User struct {
 	UserIpAtConsent     *netip.Addr  `json:"user_ip_at_consent"`
 	CreatedAt           time.Time    `json:"created_at"`
 	UpdatedAt           time.Time    `json:"updated_at"`
-	PinHash             pgtype.Text  `json:"pin_hash"`
-	FailedLoginAttempts int32        `json:"failed_login_attempts"`
-	LockedUntil         sql.NullTime `json:"locked_until"`
 }

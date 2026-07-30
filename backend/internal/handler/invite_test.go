@@ -47,8 +47,16 @@ func (m *mockAdminQuerier) GetUserByID(ctx context.Context, id uuid.UUID) (db.Us
 	return db.User{}, errors.New("not found")
 }
 
-func makeToken(svc authjwt.TokenService, subjectID, subjectType string) string {
-	token, err := svc.GenerateAccessToken(subjectID, subjectType)
+func (m *mockAdminQuerier) GetCompanyByID(ctx context.Context, id uuid.UUID) (db.Company, error) {
+	return db.Company{ID: id, Status: db.CompanyStatusActive}, nil
+}
+
+func (m *mockAdminQuerier) GetPlatformAdminByID(ctx context.Context, id uuid.UUID) (db.PlatformAdmin, error) {
+	return db.PlatformAdmin{}, errors.New("not found")
+}
+
+func makeToken(svc authjwt.TokenService, subjectID, subjectType, companyID string) string {
+	token, err := svc.GenerateAccessToken(subjectID, subjectType, companyID)
 	if err != nil {
 		panic(err)
 	}
@@ -75,7 +83,7 @@ func TestHandleInvite_NoAuth(t *testing.T) {
 func TestHandleInvite_NonAdmin(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	svc := authjwt.NewHS256Service("test-secret", 15*time.Minute)
-	token := makeToken(svc, uuid.New().String(), "user")
+	token := makeToken(svc, uuid.New().String(), "user", testCompanyID.String())
 	r := gin.New()
 	r.Use(middleware.JWTAuth(svc))
 	r.Use(middleware.RequireAdmin(&mockAdminQuerier{}))
@@ -96,10 +104,11 @@ func TestHandleInvite_ValidRequest(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	adminID := uuid.New()
 	svc := authjwt.NewHS256Service("test-secret", 15*time.Minute)
-	token := makeToken(svc, adminID.String(), "admin")
+	token := makeToken(svc, adminID.String(), "admin", testCompanyID.String())
 	adminQuerier := &mockAdminQuerier{
 		admin: &db.Admin{
 			ID:           adminID,
+			CompanyID:    testCompanyID,
 			Email:        "admin@example.com",
 			PasswordHash: "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy",
 		},
@@ -150,10 +159,11 @@ func TestHandleInvite_DuplicateInvitation(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	adminID := uuid.New()
 	svc := authjwt.NewHS256Service("test-secret", 15*time.Minute)
-	token := makeToken(svc, adminID.String(), "admin")
+	token := makeToken(svc, adminID.String(), "admin", testCompanyID.String())
 	adminQuerier := &mockAdminQuerier{
 		admin: &db.Admin{
 			ID:           adminID,
+			CompanyID:    testCompanyID,
 			Email:        "admin@example.com",
 			PasswordHash: "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy",
 		},
@@ -182,10 +192,11 @@ func TestHandleInvite_BadRequestBody(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	adminID := uuid.New()
 	svc := authjwt.NewHS256Service("test-secret", 15*time.Minute)
-	token := makeToken(svc, adminID.String(), "admin")
+	token := makeToken(svc, adminID.String(), "admin", testCompanyID.String())
 	adminQuerier := &mockAdminQuerier{
 		admin: &db.Admin{
 			ID:           adminID,
+			CompanyID:    testCompanyID,
 			Email:        "admin@example.com",
 			PasswordHash: "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy",
 		},
@@ -211,10 +222,11 @@ func TestHandleInvite_MissingEmail(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	adminID := uuid.New()
 	svc := authjwt.NewHS256Service("test-secret", 15*time.Minute)
-	token := makeToken(svc, adminID.String(), "admin")
+	token := makeToken(svc, adminID.String(), "admin", testCompanyID.String())
 	adminQuerier := &mockAdminQuerier{
 		admin: &db.Admin{
 			ID:           adminID,
+			CompanyID:    testCompanyID,
 			Email:        "admin@example.com",
 			PasswordHash: "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy",
 		},

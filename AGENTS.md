@@ -7,7 +7,7 @@ Salary advance pilot app. See `docs/brief.md` for business rules and `docs/schem
 - **Backend:** Go 1.26, Gin, sqlc, pgx/v5, golang-migrate, Resend
 - **Admin:** Next.js 16, shadcn/ui, Tailwind v4, TanStack Query
 - **Mobile:** Expo SDK 54, React Native 0.81, NativeWind, TanStack Query, expo-secure-store
-- **Database:** PostgreSQL 17 (Neon/Supabase)
+- **Database:** PostgreSQL 18.4 (Neon/Supabase)
 - **Payments:** Campay Withdraw API (`POST /withdraw/`, sandbox: `https://demo.campay.net/api`)
 - **Testing:** Go `testing`, Jest + RTL (admin), Jest + RNTL (mobile)
 

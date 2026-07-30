@@ -14,11 +14,12 @@ import (
 )
 
 const createEvent = `-- name: CreateEvent :one
-INSERT INTO events (user_id, admin_id, event_type, metadata)
-VALUES ($1, $2, $3, $4) RETURNING id, user_id, admin_id, event_type, metadata, created_at
+INSERT INTO events (company_id, user_id, admin_id, event_type, metadata)
+VALUES ($1, $2, $3, $4, $5) RETURNING id, company_id, user_id, admin_id, event_type, metadata, created_at
 `
 
 type CreateEventParams struct {
+	CompanyID pgtype.UUID `json:"company_id"`
 	UserID    pgtype.UUID `json:"user_id"`
 	AdminID   pgtype.UUID `json:"admin_id"`
 	EventType string      `json:"event_type"`
@@ -27,6 +28,7 @@ type CreateEventParams struct {
 
 func (q *Queries) CreateEvent(ctx context.Context, arg CreateEventParams) (Event, error) {
 	row := q.db.QueryRow(ctx, createEvent,
+		arg.CompanyID,
 		arg.UserID,
 		arg.AdminID,
 		arg.EventType,
@@ -35,6 +37,7 @@ func (q *Queries) CreateEvent(ctx context.Context, arg CreateEventParams) (Event
 	var i Event
 	err := row.Scan(
 		&i.ID,
+		&i.CompanyID,
 		&i.UserID,
 		&i.AdminID,
 		&i.EventType,
@@ -44,59 +47,24 @@ func (q *Queries) CreateEvent(ctx context.Context, arg CreateEventParams) (Event
 	return i, err
 }
 
-const listEvents = `-- name: ListEvents :many
-SELECT id, user_id, admin_id, event_type, metadata, created_at FROM events
-ORDER BY created_at DESC
-LIMIT $1 OFFSET $2
-`
-
-type ListEventsParams struct {
-	Limit  int32 `json:"limit"`
-	Offset int32 `json:"offset"`
-}
-
-func (q *Queries) ListEvents(ctx context.Context, arg ListEventsParams) ([]Event, error) {
-	rows, err := q.db.Query(ctx, listEvents, arg.Limit, arg.Offset)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []Event
-	for rows.Next() {
-		var i Event
-		if err := rows.Scan(
-			&i.ID,
-			&i.UserID,
-			&i.AdminID,
-			&i.EventType,
-			&i.Metadata,
-			&i.CreatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listEventsWithUser = `-- name: ListEventsWithUser :many
-SELECT e.id, e.user_id, e.admin_id, e.event_type, e.metadata, e.created_at, u.email AS user_email
+const listEventsWithUserByCompany = `-- name: ListEventsWithUserByCompany :many
+SELECT e.id, e.company_id, e.user_id, e.admin_id, e.event_type, e.metadata, e.created_at, u.email AS user_email
 FROM events e
 LEFT JOIN users u ON e.user_id = u.id
+WHERE e.company_id = $1
 ORDER BY e.created_at DESC
-LIMIT $1 OFFSET $2
+LIMIT $2 OFFSET $3
 `
 
-type ListEventsWithUserParams struct {
-	Limit  int32 `json:"limit"`
-	Offset int32 `json:"offset"`
+type ListEventsWithUserByCompanyParams struct {
+	CompanyID pgtype.UUID `json:"company_id"`
+	Limit     int32       `json:"limit"`
+	Offset    int32       `json:"offset"`
 }
 
-type ListEventsWithUserRow struct {
+type ListEventsWithUserByCompanyRow struct {
 	ID        uuid.UUID   `json:"id"`
+	CompanyID pgtype.UUID `json:"company_id"`
 	UserID    pgtype.UUID `json:"user_id"`
 	AdminID   pgtype.UUID `json:"admin_id"`
 	EventType string      `json:"event_type"`
@@ -105,17 +73,18 @@ type ListEventsWithUserRow struct {
 	UserEmail pgtype.Text `json:"user_email"`
 }
 
-func (q *Queries) ListEventsWithUser(ctx context.Context, arg ListEventsWithUserParams) ([]ListEventsWithUserRow, error) {
-	rows, err := q.db.Query(ctx, listEventsWithUser, arg.Limit, arg.Offset)
+func (q *Queries) ListEventsWithUserByCompany(ctx context.Context, arg ListEventsWithUserByCompanyParams) ([]ListEventsWithUserByCompanyRow, error) {
+	rows, err := q.db.Query(ctx, listEventsWithUserByCompany, arg.CompanyID, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListEventsWithUserRow
+	var items []ListEventsWithUserByCompanyRow
 	for rows.Next() {
-		var i ListEventsWithUserRow
+		var i ListEventsWithUserByCompanyRow
 		if err := rows.Scan(
 			&i.ID,
+			&i.CompanyID,
 			&i.UserID,
 			&i.AdminID,
 			&i.EventType,

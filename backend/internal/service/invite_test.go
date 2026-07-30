@@ -35,13 +35,14 @@ func (m *mockStore) GetInvitationByEmail(ctx context.Context, email string) (db.
 	return *m.invitation, nil
 }
 
-func (m *mockStore) CreateInvitation(ctx context.Context, email string, invitedBy pgtype.UUID) (db.Invitation, error) {
+func (m *mockStore) CreateInvitation(ctx context.Context, email string, companyID uuid.UUID, invitedBy pgtype.UUID) (db.Invitation, error) {
 	if m.createErr != nil {
 		return db.Invitation{}, m.createErr
 	}
 	m.createdEmail = email
 	return db.Invitation{
 		ID:        uuid.New(),
+		CompanyID: companyID,
 		Email:     email,
 		Status:    db.InvitationStatusPending,
 		InvitedBy: invitedBy,
@@ -210,5 +211,31 @@ func TestInvite_AdminNotFound(t *testing.T) {
 	_, err := svc.Invite(context.Background(), "newadmin@example.com", uuid.New().String())
 	if err == nil {
 		t.Fatal("expected error when admin not found")
+	}
+}
+
+func TestInvite_InvalidAdminID(t *testing.T) {
+	svc := NewInviteService(&mockStore{}, &mockEmailSender{}, &mockAdminQuerier{})
+	if _, err := svc.Invite(context.Background(), "a@b.com", "not-a-uuid"); err == nil {
+		t.Fatal("expected error for an unparseable admin id")
+	}
+}
+
+func TestInvite_CreateInvitationError(t *testing.T) {
+	adminID := uuid.New()
+	store := &mockStore{createErr: errTestNotFound}
+	svc := NewInviteService(store, &mockEmailSender{}, &mockAdminQuerier{admin: &db.Admin{ID: adminID}})
+	if _, err := svc.Invite(context.Background(), "a@b.com", adminID.String()); err == nil {
+		t.Fatal("expected error when CreateInvitation fails")
+	}
+}
+
+func TestInvite_UpdateToSentError(t *testing.T) {
+	adminID := uuid.New()
+	// Send succeeds, but the final status update to "sent" fails.
+	store := &mockStore{updateErr: errTestNotFound}
+	svc := NewInviteService(store, &mockEmailSender{}, &mockAdminQuerier{admin: &db.Admin{ID: adminID}})
+	if _, err := svc.Invite(context.Background(), "a@b.com", adminID.String()); err == nil {
+		t.Fatal("expected error when the final status update fails")
 	}
 }

@@ -1,4 +1,0 @@
--- 000002_seed_admin.up.sql
--- Admin records are created manually via Firebase Auth + direct DB insert.
--- Example:
--- INSERT INTO admins (email, firebase_uid) VALUES ('admin@example.com', '<firebase_uid>');

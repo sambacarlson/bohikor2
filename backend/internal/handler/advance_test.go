@@ -35,6 +35,8 @@ type mockAdvanceQuerier struct {
 	listErr        error
 	countToday     int64
 	countThisMonth int64
+	countTodayErr  error
+	countMonthErr  error
 }
 
 func (m *mockAdvanceQuerier) GetUserByID(ctx context.Context, id uuid.UUID) (db.User, error) {
@@ -100,11 +102,11 @@ func (m *mockAdvanceQuerier) ListAdvanceRequestsByUserID(ctx context.Context, us
 }
 
 func (m *mockAdvanceQuerier) CountAdvanceRequestsByUserToday(ctx context.Context, userID uuid.UUID) (int64, error) {
-	return m.countToday, nil
+	return m.countToday, m.countTodayErr
 }
 
 func (m *mockAdvanceQuerier) CountSuccessfulAdvanceRequestsByUserThisMonth(ctx context.Context, userID uuid.UUID) (int64, error) {
-	return m.countThisMonth, nil
+	return m.countThisMonth, m.countMonthErr
 }
 
 type mockAdvanceSettingsQuerier struct {
@@ -123,7 +125,7 @@ func defaultMockSettings() []db.Setting {
 	}
 }
 
-func (m *mockAdvanceSettingsQuerier) ListSettings(ctx context.Context) ([]db.Setting, error) {
+func (m *mockAdvanceSettingsQuerier) ListSettingsByCompany(ctx context.Context, companyID uuid.UUID) ([]db.Setting, error) {
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -131,22 +133,6 @@ func (m *mockAdvanceSettingsQuerier) ListSettings(ctx context.Context) ([]db.Set
 		return defaultMockSettings(), nil
 	}
 	return m.settings, nil
-}
-
-func (m *mockAdvanceSettingsQuerier) GetSetting(ctx context.Context, key string) (db.Setting, error) {
-	if m.settings == nil {
-		for _, s := range defaultMockSettings() {
-			if s.Key == key {
-				return s, nil
-			}
-		}
-	}
-	for _, s := range m.settings {
-		if s.Key == key {
-			return s, nil
-		}
-	}
-	return db.Setting{}, errTestNotFound
 }
 
 type mockCampayTransferer struct {
@@ -164,9 +150,17 @@ func (m *mockCampayTransferer) InitiateCollection(ctx context.Context, phoneNumb
 	return m.collectResp, m.collectErr
 }
 
+var testCompanyID = uuid.MustParse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+
 func makeTestGin() *gin.Engine {
 	gin.SetMode(gin.TestMode)
-	return gin.New()
+	r := gin.New()
+	// Emulate RequireAdmin/RequireActiveUser placing the company scope in context.
+	r.Use(func(c *gin.Context) {
+		c.Set("company_id", testCompanyID)
+		c.Next()
+	})
+	return r
 }
 
 func setUserContext(c *gin.Context, userID uuid.UUID) {
@@ -594,6 +588,13 @@ type mockWebhookQuerier struct {
 	request   *db.AdvanceRequest
 	getErr    error
 	updateErr error
+
+	// phone-verification branch config
+	phoneVerif        *db.PhoneVerification
+	phoneUpdateErr    error
+	setVerifiedErr    error
+	setVerifiedCalled bool
+	phoneEvents       int
 }
 
 func (m *mockWebhookQuerier) GetAdvanceRequestByCampayRef(ctx context.Context, campayPayoutRef pgtype.Text) (db.AdvanceRequest, error) {
@@ -614,19 +615,32 @@ func (m *mockWebhookQuerier) UpdateAdvanceRequestStatus(ctx context.Context, arg
 }
 
 func (m *mockWebhookQuerier) CreateEvent(ctx context.Context, arg db.CreateEventParams) (db.Event, error) {
+	if arg.EventType == "phone_verified" {
+		m.phoneEvents++
+	}
 	return db.Event{ID: uuid.New()}, nil
 }
 
 func (m *mockWebhookQuerier) GetPhoneVerificationByCampayRef(ctx context.Context, campayPayoutRef pgtype.Text) (db.PhoneVerification, error) {
-	return db.PhoneVerification{}, errTestNotFound
+	if m.phoneVerif == nil {
+		return db.PhoneVerification{}, errTestNotFound
+	}
+	return *m.phoneVerif, nil
 }
 
 func (m *mockWebhookQuerier) UpdatePhoneVerificationStatus(ctx context.Context, arg db.UpdatePhoneVerificationStatusParams) (db.PhoneVerification, error) {
-	return db.PhoneVerification{}, nil
+	if m.phoneUpdateErr != nil {
+		return db.PhoneVerification{}, m.phoneUpdateErr
+	}
+	return db.PhoneVerification{ID: arg.ID, Status: arg.Status}, nil
 }
 
 func (m *mockWebhookQuerier) SetPhoneVerified(ctx context.Context, id uuid.UUID) (db.User, error) {
-	return db.User{}, nil
+	m.setVerifiedCalled = true
+	if m.setVerifiedErr != nil {
+		return db.User{}, m.setVerifiedErr
+	}
+	return db.User{ID: id}, nil
 }
 
 type mockWebhookVerifier struct {
@@ -812,7 +826,7 @@ func TestHandleListAdminRequests_WithData(t *testing.T) {
 	userID := uuid.New()
 	email := "user@example.com"
 	q := &mockAdminRequestsQuerier{
-		requests: []db.ListAdvanceRequestsWithUserRow{
+		requests: []db.ListAdvanceRequestsWithUserByCompanyRow{
 			{ID: reqID, UserID: userID, Status: db.RequestStatusSuccess, UserEmail: email, CreatedAt: time.Now().UTC()},
 		},
 	}
@@ -834,16 +848,16 @@ func TestHandleListAdminRequests_WithData(t *testing.T) {
 }
 
 type mockAdminRequestsQuerier struct {
-	requests []db.ListAdvanceRequestsWithUserRow
+	requests []db.ListAdvanceRequestsWithUserByCompanyRow
 	err      error
 }
 
-func (m *mockAdminRequestsQuerier) ListAdvanceRequestsWithUser(ctx context.Context, arg db.ListAdvanceRequestsWithUserParams) ([]db.ListAdvanceRequestsWithUserRow, error) {
+func (m *mockAdminRequestsQuerier) ListAdvanceRequestsWithUserByCompany(ctx context.Context, arg db.ListAdvanceRequestsWithUserByCompanyParams) ([]db.ListAdvanceRequestsWithUserByCompanyRow, error) {
 	if m.err != nil {
 		return nil, m.err
 	}
 	if m.requests == nil {
-		return []db.ListAdvanceRequestsWithUserRow{}, nil
+		return []db.ListAdvanceRequestsWithUserByCompanyRow{}, nil
 	}
 	return m.requests, nil
 }

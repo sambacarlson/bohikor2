@@ -12,45 +12,49 @@ import (
 )
 
 const createAdmin = `-- name: CreateAdmin :one
-INSERT INTO admins (email, password_hash)
-VALUES ($1, $2) RETURNING id, email, created_at, password_hash
+INSERT INTO admins (company_id, email, password_hash)
+VALUES ($1, $2, $3) RETURNING id, company_id, email, password_hash, created_at
 `
 
 type CreateAdminParams struct {
-	Email        string `json:"email"`
-	PasswordHash string `json:"password_hash"`
+	CompanyID    uuid.UUID `json:"company_id"`
+	Email        string    `json:"email"`
+	PasswordHash string    `json:"password_hash"`
 }
 
 func (q *Queries) CreateAdmin(ctx context.Context, arg CreateAdminParams) (Admin, error) {
-	row := q.db.QueryRow(ctx, createAdmin, arg.Email, arg.PasswordHash)
+	row := q.db.QueryRow(ctx, createAdmin, arg.CompanyID, arg.Email, arg.PasswordHash)
 	var i Admin
 	err := row.Scan(
 		&i.ID,
+		&i.CompanyID,
 		&i.Email,
-		&i.CreatedAt,
 		&i.PasswordHash,
+		&i.CreatedAt,
 	)
 	return i, err
 }
 
 const getAdminByEmail = `-- name: GetAdminByEmail :one
-SELECT id, email, created_at, password_hash FROM admins WHERE email = $1 LIMIT 1
+SELECT id, company_id, email, password_hash, created_at FROM admins WHERE email = $1 LIMIT 1
 `
 
+// Pre-auth resolution: admin email is globally unique.
 func (q *Queries) GetAdminByEmail(ctx context.Context, email string) (Admin, error) {
 	row := q.db.QueryRow(ctx, getAdminByEmail, email)
 	var i Admin
 	err := row.Scan(
 		&i.ID,
+		&i.CompanyID,
 		&i.Email,
-		&i.CreatedAt,
 		&i.PasswordHash,
+		&i.CreatedAt,
 	)
 	return i, err
 }
 
 const getAdminByID = `-- name: GetAdminByID :one
-SELECT id, email, created_at, password_hash FROM admins WHERE id = $1 LIMIT 1
+SELECT id, company_id, email, password_hash, created_at FROM admins WHERE id = $1 LIMIT 1
 `
 
 func (q *Queries) GetAdminByID(ctx context.Context, id uuid.UUID) (Admin, error) {
@@ -58,9 +62,10 @@ func (q *Queries) GetAdminByID(ctx context.Context, id uuid.UUID) (Admin, error)
 	var i Admin
 	err := row.Scan(
 		&i.ID,
+		&i.CompanyID,
 		&i.Email,
-		&i.CreatedAt,
 		&i.PasswordHash,
+		&i.CreatedAt,
 	)
 	return i, err
 }

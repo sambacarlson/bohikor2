@@ -10,7 +10,7 @@ import (
 )
 
 const getActiveInvitationByEmail = `-- name: GetActiveInvitationByEmail :one
-SELECT id, email, status, invited_by, sent_at, accepted_at, updated_at FROM invitations
+SELECT id, company_id, email, status, invited_by, sent_at, accepted_at, updated_at FROM invitations
 WHERE email = $1 AND status IN ('pending', 'sent', 'accepted')
 LIMIT 1
 `
@@ -20,6 +20,7 @@ func (q *Queries) GetActiveInvitationByEmail(ctx context.Context, email string) 
 	var i Invitation
 	err := row.Scan(
 		&i.ID,
+		&i.CompanyID,
 		&i.Email,
 		&i.Status,
 		&i.InvitedBy,

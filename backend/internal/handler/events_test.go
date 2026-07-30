@@ -16,16 +16,16 @@ import (
 )
 
 type mockEventsQuerier struct {
-	events []db.ListEventsWithUserRow
+	events []db.ListEventsWithUserByCompanyRow
 	err    error
 }
 
-func (m *mockEventsQuerier) ListEventsWithUser(ctx context.Context, arg db.ListEventsWithUserParams) ([]db.ListEventsWithUserRow, error) {
+func (m *mockEventsQuerier) ListEventsWithUserByCompany(ctx context.Context, arg db.ListEventsWithUserByCompanyParams) ([]db.ListEventsWithUserByCompanyRow, error) {
 	if m.err != nil {
 		return nil, m.err
 	}
 	if m.events == nil {
-		return []db.ListEventsWithUserRow{}, nil
+		return []db.ListEventsWithUserByCompanyRow{}, nil
 	}
 	return m.events, nil
 }
@@ -53,7 +53,7 @@ func TestHandleListEvents_WithData(t *testing.T) {
 	eventID := uuid.New()
 	userID := uuid.New()
 	q := &mockEventsQuerier{
-		events: []db.ListEventsWithUserRow{
+		events: []db.ListEventsWithUserByCompanyRow{
 			{
 				ID:        eventID,
 				UserID:    pgtype.UUID{Bytes: userID, Valid: true},
@@ -98,7 +98,7 @@ func TestHandleListEvents_IncludesUserEmail(t *testing.T) {
 	userID := uuid.New()
 	email := "employee@company.com"
 	q := &mockEventsQuerier{
-		events: []db.ListEventsWithUserRow{
+		events: []db.ListEventsWithUserByCompanyRow{
 			{
 				ID:        eventID,
 				UserID:    pgtype.UUID{Bytes: userID, Valid: true},
@@ -144,7 +144,7 @@ func TestHandleListAdminRequests_IncludesUserEmail(t *testing.T) {
 	userID := uuid.New()
 	email := "employee@company.com"
 	q := &mockAdminRequestsQuerier{
-		requests: []db.ListAdvanceRequestsWithUserRow{
+		requests: []db.ListAdvanceRequestsWithUserByCompanyRow{
 			{
 				ID:        reqID,
 				UserID:    userID,
