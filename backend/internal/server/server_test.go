@@ -109,6 +109,47 @@ func TestAdminMeEndpoint_NotAdmin(t *testing.T) {
 	}
 }
 
+func TestAdminMeEndpoint_ActiveAdmin(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	adminID := uuid.New()
+	q := &testQuerier{
+		admin: &db.Admin{
+			ID: adminID, CompanyID: testCompany, Email: "admin@test.com",
+			PasswordHash: "$2a$10$secretbcryptvaluethatmustneverleak",
+		},
+	}
+	svc := authjwt.NewHS256Service("test-secret", 15*time.Minute)
+	token := makeToken(svc, adminID.String(), "admin", testCompany.String())
+	r := gin.New()
+	r.Use(middleware.JWTAuth(svc))
+	r.Use(middleware.RequireAdmin(q))
+	r.GET("/api/admin/me", handleAdminMe(q))
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequestWithContext(context.Background(), "GET", "/api/admin/me", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if strings.Contains(w.Body.String(), "password_hash") || strings.Contains(w.Body.String(), q.admin.PasswordHash) {
+		t.Fatalf("response leaked password hash: %s", w.Body.String())
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+	data, ok := resp["data"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected data object, got %v", resp["data"])
+	}
+	if data["id"] != adminID.String() {
+		t.Fatalf("expected id %s, got %v", adminID.String(), data["id"])
+	}
+}
+
 func TestUserMeEndpoint_UserNotFound(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	svc := authjwt.NewHS256Service("test-secret", 15*time.Minute)

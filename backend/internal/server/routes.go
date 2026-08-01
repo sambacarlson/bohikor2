@@ -65,7 +65,12 @@ func handleAdminMe(q adminQuerier) gin.HandlerFunc {
 		}
 
 		c.JSON(http.StatusOK, gin.H{
-			"data": admin,
+			"data": gin.H{
+				"id":         admin.ID,
+				"company_id": admin.CompanyID,
+				"email":      admin.Email,
+				"created_at": admin.CreatedAt,
+			},
 		})
 	}
 }
