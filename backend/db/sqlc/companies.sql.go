@@ -157,6 +157,24 @@ func (q *Queries) ListCompaniesWithBalance(ctx context.Context) ([]ListCompanies
 	return items, nil
 }
 
+const lockCompanyForFloatCheck = `-- name: LockCompanyForFloatCheck :one
+SELECT id FROM companies WHERE id = $1 FOR UPDATE
+`
+
+// Acquires a row lock on the company for the life of the caller's
+// transaction, serializing concurrent float-affecting writes (advance
+// debits, reissue debits) against the same company. A balance check made
+// after this call, inside the same transaction, is guaranteed accurate:
+// any concurrent transaction attempting the same lock blocks until this
+// one commits or rolls back, and then observes this transaction's
+// committed ledger writes under READ COMMITTED.
+func (q *Queries) LockCompanyForFloatCheck(ctx context.Context, id uuid.UUID) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, lockCompanyForFloatCheck, id)
+	var id_2 uuid.UUID
+	err := row.Scan(&id_2)
+	return id_2, err
+}
+
 const updateCompanyStatus = `-- name: UpdateCompanyStatus :one
 UPDATE companies SET status = $2, updated_at = NOW()
 WHERE id = $1 RETURNING id, slug, name, status, created_by, created_at, updated_at

@@ -18,25 +18,91 @@ import (
 
 	db "github.com/Iknite-Space/bohikor2/db/sqlc"
 	"github.com/Iknite-Space/bohikor2/internal/campay"
+	"github.com/Iknite-Space/bohikor2/internal/service"
 )
 
 var errTestNotFound = errors.New("not found")
 
 type mockAdvanceQuerier struct {
-	user           *db.User
-	activeRequest  *db.AdvanceRequest
-	createdRequest *db.AdvanceRequest
-	updatedRequest *db.AdvanceRequest
-	requests       []db.AdvanceRequest
-	getUserErr     error
-	getActiveErr   error
-	createErr      error
-	updateErr      error
-	listErr        error
-	countToday     int64
-	countThisMonth int64
-	countTodayErr  error
-	countMonthErr  error
+	user                 *db.User
+	activeRequest        *db.AdvanceRequest
+	createdRequest       *db.AdvanceRequest
+	updatedRequest       *db.AdvanceRequest
+	requests             []db.AdvanceRequest
+	getUserErr           error
+	getActiveErr         error
+	createErr            error
+	updateErr            error
+	listErr              error
+	countToday           int64
+	countThisMonth       int64
+	countTodayErr        error
+	countMonthErr        error
+	balance              pgtype.Numeric
+	balanceErr           error
+	byID                 *db.AdvanceRequest
+	byIDErr              error
+	lastTransitionStatus db.RequestStatus
+	lastTransitionOpts   service.TransitionOpts
+}
+
+func (m *mockAdvanceQuerier) GetCompanyBalance(ctx context.Context, companyID uuid.UUID) (pgtype.Numeric, error) {
+	if m.balanceErr != nil {
+		return pgtype.Numeric{}, m.balanceErr
+	}
+	if m.balance.Valid {
+		return m.balance, nil
+	}
+	var big pgtype.Numeric
+	_ = big.Scan("1000000000")
+	return big, nil
+}
+
+func (m *mockAdvanceQuerier) GetAdvanceRequestByID(ctx context.Context, id uuid.UUID) (db.AdvanceRequest, error) {
+	if m.byIDErr != nil {
+		return db.AdvanceRequest{}, m.byIDErr
+	}
+	if m.byID == nil {
+		return db.AdvanceRequest{}, errTestNotFound
+	}
+	return *m.byID, nil
+}
+
+func (m *mockAdvanceQuerier) CreateAdvanceRequestWithDebit(ctx context.Context, arg db.CreateAdvanceRequestParams) (db.AdvanceRequest, error) {
+	if m.createErr != nil {
+		return db.AdvanceRequest{}, m.createErr
+	}
+	if m.createdRequest != nil {
+		return *m.createdRequest, nil
+	}
+	return db.AdvanceRequest{
+		ID:        uuid.New(),
+		CompanyID: arg.CompanyID,
+		UserID:    arg.UserID,
+		AmountXaf: arg.AmountXaf,
+		Status:    arg.Status,
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+	}, nil
+}
+
+func (m *mockAdvanceQuerier) Transition(ctx context.Context, req db.AdvanceRequest, newStatus db.RequestStatus, opts service.TransitionOpts) (db.AdvanceRequest, error) {
+	m.lastTransitionStatus = newStatus
+	m.lastTransitionOpts = opts
+	if m.updateErr != nil {
+		return db.AdvanceRequest{}, m.updateErr
+	}
+	if m.updatedRequest != nil {
+		return *m.updatedRequest, nil
+	}
+	req.Status = newStatus
+	if opts.FailureReason != "" {
+		req.FailureReason = pgtype.Text{String: opts.FailureReason, Valid: true}
+	}
+	if opts.CampayPayoutRef != "" {
+		req.CampayPayoutRef = pgtype.Text{String: opts.CampayPayoutRef, Valid: true}
+	}
+	return req, nil
 }
 
 func (m *mockAdvanceQuerier) GetUserByID(ctx context.Context, id uuid.UUID) (db.User, error) {
@@ -387,7 +453,7 @@ func TestCreateRequest_TransferPending(t *testing.T) {
 	}
 }
 
-func TestCreateRequest_TransferFailed(t *testing.T) {
+func TestCreateRequest_TransferTransportError_MapsToProcessing(t *testing.T) {
 	userID := uuid.New()
 	q := &mockAdvanceQuerier{
 		user: &db.User{
@@ -402,7 +468,47 @@ func TestCreateRequest_TransferFailed(t *testing.T) {
 		},
 	}
 	transferMock := &mockCampayTransferer{
-		transferErr: errors.New("transfer failed: insufficient funds"),
+		transferErr: errors.New("dial tcp: i/o timeout"),
+	}
+	h := NewAdvanceHandler(q, transferMock, &mockAdvanceSettingsQuerier{}, time.UTC)
+
+	r := makeTestGin()
+	r.POST("/api/advance-requests", func(c *gin.Context) {
+		setUserContext(c, userID)
+		h.CreateRequest(c)
+	})
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequestWithContext(context.Background(), "POST", "/api/advance-requests",
+		strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d: %s", w.Code, w.Body.String())
+	}
+	if q.lastTransitionStatus != db.RequestStatusProcessing {
+		t.Fatalf("expected transition to processing, got %s", q.lastTransitionStatus)
+	}
+}
+
+func TestCreateRequest_TransferDeclinedByCampay_MapsToFailed(t *testing.T) {
+	userID := uuid.New()
+	q := &mockAdvanceQuerier{
+		user: &db.User{
+			ID:                  userID,
+			IsTermsAccepted:     true,
+			PhoneVerified:       true,
+			PhoneNumber:         pgtype.Text{String: "+237600000000", Valid: true},
+			Status:              db.UserStatusActive,
+			PinHash:             pgtype.Text{Valid: false},
+			FailedLoginAttempts: 0,
+			LockedUntil:         sql.NullTime{},
+		},
+	}
+	transferMock := &mockCampayTransferer{
+		transferResp: &campay.TransferResponse{Reference: "campay-ref-declined", Status: "FAILED", Message: "insufficient operator funds"},
+		transferErr:  errors.New("transfer failed: insufficient operator funds"),
 	}
 	h := NewAdvanceHandler(q, transferMock, &mockAdvanceSettingsQuerier{}, time.UTC)
 
@@ -419,7 +525,95 @@ func TestCreateRequest_TransferFailed(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusBadGateway {
-		t.Fatalf("expected 502, got %d", w.Code)
+		t.Fatalf("expected 502, got %d: %s", w.Code, w.Body.String())
+	}
+	if q.lastTransitionStatus != db.RequestStatusFailed {
+		t.Fatalf("expected transition to failed, got %s", q.lastTransitionStatus)
+	}
+}
+
+func TestCreateRequest_TransferTransportError_TransitionWriteFails_Returns500(t *testing.T) {
+	userID := uuid.New()
+	q := &mockAdvanceQuerier{
+		user: &db.User{
+			ID:                  userID,
+			IsTermsAccepted:     true,
+			PhoneVerified:       true,
+			PhoneNumber:         pgtype.Text{String: "+237600000000", Valid: true},
+			Status:              db.UserStatusActive,
+			PinHash:             pgtype.Text{Valid: false},
+			FailedLoginAttempts: 0,
+			LockedUntil:         sql.NullTime{},
+		},
+		updateErr: errors.New("connection reset by peer"),
+	}
+	transferMock := &mockCampayTransferer{
+		transferErr: errors.New("dial tcp: i/o timeout"),
+	}
+	h := NewAdvanceHandler(q, transferMock, &mockAdvanceSettingsQuerier{}, time.UTC)
+
+	r := makeTestGin()
+	r.POST("/api/advance-requests", func(c *gin.Context) {
+		setUserContext(c, userID)
+		h.CreateRequest(c)
+	})
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequestWithContext(context.Background(), "POST", "/api/advance-requests",
+		strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	// The Campay call itself never resolved AND the fallback write to
+	// `processing` also failed — the request's outcome could not be durably
+	// recorded, so this must surface as a 500, not the usual 202. Silently
+	// returning 202 here would tell the caller the reconciler has this
+	// covered when the row was never actually marked for pickup.
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500 when the post-transport-error transition write itself fails, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestCreateRequest_TransferDeclined_TransitionWriteFails_Returns500(t *testing.T) {
+	userID := uuid.New()
+	q := &mockAdvanceQuerier{
+		user: &db.User{
+			ID:                  userID,
+			IsTermsAccepted:     true,
+			PhoneVerified:       true,
+			PhoneNumber:         pgtype.Text{String: "+237600000000", Valid: true},
+			Status:              db.UserStatusActive,
+			PinHash:             pgtype.Text{Valid: false},
+			FailedLoginAttempts: 0,
+			LockedUntil:         sql.NullTime{},
+		},
+		updateErr: errors.New("connection reset by peer"),
+	}
+	transferMock := &mockCampayTransferer{
+		transferResp: &campay.TransferResponse{Reference: "campay-ref-declined-2", Status: "FAILED", Message: "insufficient operator funds"},
+		transferErr:  errors.New("transfer failed: insufficient operator funds"),
+	}
+	h := NewAdvanceHandler(q, transferMock, &mockAdvanceSettingsQuerier{}, time.UTC)
+
+	r := makeTestGin()
+	r.POST("/api/advance-requests", func(c *gin.Context) {
+		setUserContext(c, userID)
+		h.CreateRequest(c)
+	})
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequestWithContext(context.Background(), "POST", "/api/advance-requests",
+		strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	// Campay declined AND the write recording that failure also failed — we
+	// cannot honestly report either "accepted" (202) or even the usual
+	// "transfer failed" (502), since we don't know the row reflects reality.
+	// This must surface as a 500, matching the post-transfer-DB-write-failure
+	// branch's own 500 for the identical "our write didn't land" reason.
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500 when the post-decline transition write itself fails, got %d: %s", w.Code, w.Body.String())
 	}
 }
 
@@ -595,6 +789,13 @@ type mockWebhookQuerier struct {
 	setVerifiedErr    error
 	setVerifiedCalled bool
 	phoneEvents       int
+
+	// fallback (GetAdvanceRequestByID via external_reference) + Transition config
+	byExternalRef        *db.AdvanceRequest
+	byExternalRefErr     error
+	lastTransitionStatus db.RequestStatus
+	lastTransitionOpts   service.TransitionOpts
+	transitionErr        error
 }
 
 func (m *mockWebhookQuerier) GetAdvanceRequestByCampayRef(ctx context.Context, campayPayoutRef pgtype.Text) (db.AdvanceRequest, error) {
@@ -612,6 +813,26 @@ func (m *mockWebhookQuerier) UpdateAdvanceRequestStatus(ctx context.Context, arg
 		return db.AdvanceRequest{}, m.updateErr
 	}
 	return db.AdvanceRequest{ID: arg.ID, Status: arg.Status}, nil
+}
+
+func (m *mockWebhookQuerier) GetAdvanceRequestByID(ctx context.Context, id uuid.UUID) (db.AdvanceRequest, error) {
+	if m.byExternalRefErr != nil {
+		return db.AdvanceRequest{}, m.byExternalRefErr
+	}
+	if m.byExternalRef == nil {
+		return db.AdvanceRequest{}, errTestNotFound
+	}
+	return *m.byExternalRef, nil
+}
+
+func (m *mockWebhookQuerier) Transition(ctx context.Context, req db.AdvanceRequest, newStatus db.RequestStatus, opts service.TransitionOpts) (db.AdvanceRequest, error) {
+	m.lastTransitionStatus = newStatus
+	m.lastTransitionOpts = opts
+	if m.transitionErr != nil {
+		return db.AdvanceRequest{}, m.transitionErr
+	}
+	req.Status = newStatus
+	return req, nil
 }
 
 func (m *mockWebhookQuerier) CreateEvent(ctx context.Context, arg db.CreateEventParams) (db.Event, error) {
@@ -742,6 +963,52 @@ func TestWebhook_FailedStatus(t *testing.T) {
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestWebhook_SuccessGoesThroughTransition(t *testing.T) {
+	existing := db.AdvanceRequest{ID: uuid.New(), CompanyID: testCompanyID, UserID: uuid.New(), Status: db.RequestStatusPending, CreatedAt: time.Now().Add(-5 * time.Second)}
+	campayRef := pgtype.Text{String: "campay-ref-1", Valid: true}
+	existing.CampayPayoutRef = campayRef
+	q := &mockWebhookQuerier{request: &existing}
+	h := NewWebhookHandler(q, &mockWebhookVerifier{valid: true})
+
+	r := gin.New()
+	r.POST("/webhook", h.HandleCampayWebhook)
+	body := `{"reference":"campay-ref-1","status":"SUCCESSFUL","signature":"tok"}`
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequestWithContext(context.Background(), "POST", "/webhook", strings.NewReader(body))
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if q.lastTransitionStatus != db.RequestStatusSuccess {
+		t.Fatalf("expected transition to success, got %s", q.lastTransitionStatus)
+	}
+}
+
+func TestWebhook_FallsBackToExternalReferenceLookup(t *testing.T) {
+	requestID := uuid.New()
+	existing := db.AdvanceRequest{ID: requestID, CompanyID: testCompanyID, UserID: uuid.New(), Status: db.RequestStatusProcessing, CreatedAt: time.Now().Add(-5 * time.Second)}
+	q := &mockWebhookQuerier{
+		getErr:        errTestNotFound, // GetAdvanceRequestByCampayRef finds nothing (no ref was ever persisted)
+		byExternalRef: &existing,
+	}
+	h := NewWebhookHandler(q, &mockWebhookVerifier{valid: true})
+
+	r := gin.New()
+	r.POST("/webhook", h.HandleCampayWebhook)
+	body := `{"reference":"campay-ref-late","status":"SUCCESSFUL","signature":"tok","external_reference":"` + requestID.String() + `"}`
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequestWithContext(context.Background(), "POST", "/webhook", strings.NewReader(body))
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if q.lastTransitionStatus != db.RequestStatusSuccess {
+		t.Fatalf("expected fallback lookup to resolve and transition to success, got %s", q.lastTransitionStatus)
 	}
 }
 

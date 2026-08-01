@@ -159,11 +159,12 @@ CREATE TABLE advance_requests (
     campay_payout_ref TEXT UNIQUE,
     failure_reason TEXT,
     payout_duration_seconds INTEGER,
-    -- Resilience columns (logic lands in Epic 7)
+    -- Resilience columns (Epic 7)
     attempt_count INT NOT NULL DEFAULT 0,
     last_reconciled_at TIMESTAMPTZ,
     next_retry_at TIMESTAMPTZ,
     needs_admin_review BOOLEAN NOT NULL DEFAULT FALSE,
+    reissued_from_id UUID UNIQUE REFERENCES advance_requests(id),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -173,7 +174,9 @@ CREATE INDEX idx_advance_requests_status ON advance_requests (status);
 ```
 
 - `id` doubles as the Campay `external_reference` (idempotency key).
-- The resilience columns are created now (greenfield) but exercised in Epic 7's reconciler.
+- The resilience columns are exercised by Epic 7's reconciler (`internal/reconciler`).
+- `reissued_from_id` points at the original request an admin reissue replaced. The UNIQUE
+  constraint blocks a double reissue of the same original at the DB level.
 
 ### Company Ledger (immutable; balance = running SUM)
 

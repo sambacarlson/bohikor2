@@ -149,6 +149,8 @@ set balances; settings are per-company.
 
 # Epic 7 — Payout reliability & float (backend)
 
+**Status: done** — see docs/superpowers/plans/2026-07-31-epic7-payout-reliability-implementation.md.
+
 **Goal:** no transaction can get permanently stuck; float is enforced and auditable; failures are
 recoverable by the right actor.
 

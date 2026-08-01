@@ -23,15 +23,17 @@ import (
 	"github.com/Iknite-Space/bohikor2/internal/email"
 	"github.com/Iknite-Space/bohikor2/internal/handler"
 	"github.com/Iknite-Space/bohikor2/internal/middleware"
+	"github.com/Iknite-Space/bohikor2/internal/reconciler"
 	"github.com/Iknite-Space/bohikor2/internal/repository"
 	"github.com/Iknite-Space/bohikor2/internal/service"
 )
 
 type Server struct {
-	cfg    *config.Config
-	router *gin.Engine
-	http   *http.Server
-	pool   *pgxpool.Pool
+	cfg              *config.Config
+	router           *gin.Engine
+	http             *http.Server
+	pool             *pgxpool.Pool
+	reconcilerCancel context.CancelFunc
 }
 
 func New(cfg *config.Config) (*Server, error) {
@@ -131,6 +133,7 @@ func New(cfg *config.Config) (*Server, error) {
 		platformGroup.PUT("/companies/:id/status", platformHandler.UpdateCompanyStatus)
 		platformGroup.POST("/companies/:id/admins", platformHandler.CreateCompanyAdmin)
 		platformGroup.POST("/companies/:id/ledger/topup", platformHandler.TopUpCompany)
+		platformGroup.POST("/companies/:id/ledger/adjustment", platformHandler.AdjustCompanyLedger)
 	}
 
 	userGroup := router.Group("/api/users")
@@ -151,7 +154,13 @@ func New(cfg *config.Config) (*Server, error) {
 		return nil, fmt.Errorf("load timezone: %w", err)
 	}
 
-	advanceHandler := handler.NewAdvanceHandler(queries, campayClient, queries, loc)
+	advanceStore := handler.NewRealAdvanceStore(queries, pool)
+
+	reconcilerCtx, reconcilerCancel := context.WithCancel(context.Background())
+	requestReconciler := reconciler.New(pool, queries, campayClient)
+	go requestReconciler.Run(reconcilerCtx)
+
+	advanceHandler := handler.NewAdvanceHandler(advanceStore, campayClient, queries, loc)
 	advanceGroup := router.Group("/api/advance-requests")
 	advanceGroup.Use(authMiddleware)
 	advanceGroup.Use(middleware.RequireActiveUser(queries))
@@ -159,6 +168,7 @@ func New(cfg *config.Config) (*Server, error) {
 		advanceGroup.POST("", advanceHandler.CreateRequest)
 		advanceGroup.GET("", advanceHandler.ListUserRequests)
 		advanceGroup.GET("/eligibility", advanceHandler.GetEligibility)
+		advanceGroup.POST("/:id/retry", advanceHandler.RetryRequest)
 	}
 
 	adminAdvanceGroup := router.Group("/api/admin/requests")
@@ -166,6 +176,11 @@ func New(cfg *config.Config) (*Server, error) {
 	adminAdvanceGroup.Use(middleware.RequireAdmin(queries))
 	{
 		adminAdvanceGroup.GET("", handler.HandleListAdminRequests(queries))
+
+		adminRequestsHandler := handler.NewAdminRequestsHandler(advanceStore, requestReconciler, campayClient)
+		adminAdvanceGroup.POST("/:id/reconcile", adminRequestsHandler.Reconcile)
+		adminAdvanceGroup.POST("/:id/resolve", adminRequestsHandler.Resolve)
+		adminAdvanceGroup.POST("/:id/reissue", adminRequestsHandler.Reissue)
 	}
 
 	adminGroup.PUT("/users/:id/suspend", handler.HandleSuspendUser(queries))
@@ -173,13 +188,14 @@ func New(cfg *config.Config) (*Server, error) {
 	adminGroup.GET("/settings", handler.HandleListSettings(queries))
 	adminGroup.PUT("/settings", handler.HandleUpdateSettings(queries))
 
-	webhookHandler := handler.NewWebhookHandler(queries, campayClient)
+	webhookHandler := handler.NewWebhookHandler(advanceStore, campayClient)
 	router.POST("/v1/webhooks/campay", webhookHandler.HandleCampayWebhook)
 
 	s := &Server{
-		cfg:    cfg,
-		router: router,
-		pool:   pool,
+		cfg:              cfg,
+		router:           router,
+		pool:             pool,
+		reconcilerCancel: reconcilerCancel,
 	}
 
 	s.http = &http.Server{
@@ -207,6 +223,7 @@ func (s *Server) Start() error {
 			slog.Error("server forced to shutdown", "error", err)
 		}
 
+		s.reconcilerCancel()
 		s.pool.Close()
 		slog.Info("database connection pool closed")
 	}()

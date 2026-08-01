@@ -228,6 +228,52 @@ func TestTopUpCompany_RejectsNonPositive(t *testing.T) {
 	}
 }
 
+func TestAdjustCompanyLedger_PostsSignedEntry(t *testing.T) {
+	companyID := uuid.New()
+	store := &mockPlatformStore{}
+	h := NewPlatformHandler(store, stubHasher{})
+	r := platformGin(store)
+	r.POST("/api/platform/companies/:id/ledger/adjustment", h.AdjustCompanyLedger)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequestWithContext(context.Background(), "POST",
+		"/api/platform/companies/"+companyID.String()+"/ledger/adjustment",
+		strings.NewReader(`{"amount_xaf":"-1500","note":"correcting duplicate topup"}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	if store.ledgerArg == nil || store.ledgerArg.EntryType != "adjustment" {
+		t.Fatalf("expected an adjustment ledger entry, got %+v", store.ledgerArg)
+	}
+	if store.ledgerArg.CompanyID != companyID {
+		t.Fatalf("expected ledger entry scoped to company %s", companyID)
+	}
+}
+
+func TestAdjustCompanyLedger_RejectsZero(t *testing.T) {
+	store := &mockPlatformStore{}
+	h := NewPlatformHandler(store, stubHasher{})
+	r := platformGin(store)
+	r.POST("/api/platform/companies/:id/ledger/adjustment", h.AdjustCompanyLedger)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequestWithContext(context.Background(), "POST",
+		"/api/platform/companies/"+uuid.New().String()+"/ledger/adjustment",
+		strings.NewReader(`{"amount_xaf":"0","note":"noop"}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for a zero adjustment, got %d", w.Code)
+	}
+	if store.ledgerArg != nil {
+		t.Fatal("a zero adjustment must not post a ledger entry")
+	}
+}
+
 func TestUpdateCompanyStatus_Suspend(t *testing.T) {
 	store := &mockPlatformStore{}
 	h := NewPlatformHandler(store, stubHasher{})

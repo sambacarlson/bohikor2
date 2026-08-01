@@ -41,7 +41,7 @@ func (q *Queries) CountSuccessfulAdvanceRequestsByUserThisMonth(ctx context.Cont
 
 const createAdvanceRequest = `-- name: CreateAdvanceRequest :one
 INSERT INTO advance_requests (company_id, user_id, amount_xaf, status)
-VALUES ($1, $2, $3, $4) RETURNING id, company_id, user_id, amount_xaf, status, campay_payout_ref, failure_reason, payout_duration_seconds, attempt_count, last_reconciled_at, next_retry_at, needs_admin_review, created_at, updated_at
+VALUES ($1, $2, $3, $4) RETURNING id, company_id, user_id, amount_xaf, status, campay_payout_ref, failure_reason, payout_duration_seconds, attempt_count, last_reconciled_at, next_retry_at, needs_admin_review, reissued_from_id, created_at, updated_at
 `
 
 type CreateAdvanceRequestParams struct {
@@ -72,6 +72,49 @@ func (q *Queries) CreateAdvanceRequest(ctx context.Context, arg CreateAdvanceReq
 		&i.LastReconciledAt,
 		&i.NextRetryAt,
 		&i.NeedsAdminReview,
+		&i.ReissuedFromID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const createAdvanceRequestReissue = `-- name: CreateAdvanceRequestReissue :one
+INSERT INTO advance_requests (company_id, user_id, amount_xaf, status, reissued_from_id)
+VALUES ($1, $2, $3, $4, $5) RETURNING id, company_id, user_id, amount_xaf, status, campay_payout_ref, failure_reason, payout_duration_seconds, attempt_count, last_reconciled_at, next_retry_at, needs_admin_review, reissued_from_id, created_at, updated_at
+`
+
+type CreateAdvanceRequestReissueParams struct {
+	CompanyID      uuid.UUID      `json:"company_id"`
+	UserID         uuid.UUID      `json:"user_id"`
+	AmountXaf      pgtype.Numeric `json:"amount_xaf"`
+	Status         RequestStatus  `json:"status"`
+	ReissuedFromID pgtype.UUID    `json:"reissued_from_id"`
+}
+
+func (q *Queries) CreateAdvanceRequestReissue(ctx context.Context, arg CreateAdvanceRequestReissueParams) (AdvanceRequest, error) {
+	row := q.db.QueryRow(ctx, createAdvanceRequestReissue,
+		arg.CompanyID,
+		arg.UserID,
+		arg.AmountXaf,
+		arg.Status,
+		arg.ReissuedFromID,
+	)
+	var i AdvanceRequest
+	err := row.Scan(
+		&i.ID,
+		&i.CompanyID,
+		&i.UserID,
+		&i.AmountXaf,
+		&i.Status,
+		&i.CampayPayoutRef,
+		&i.FailureReason,
+		&i.PayoutDurationSeconds,
+		&i.AttemptCount,
+		&i.LastReconciledAt,
+		&i.NextRetryAt,
+		&i.NeedsAdminReview,
+		&i.ReissuedFromID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -79,7 +122,7 @@ func (q *Queries) CreateAdvanceRequest(ctx context.Context, arg CreateAdvanceReq
 }
 
 const getActiveRequestByUserID = `-- name: GetActiveRequestByUserID :one
-SELECT id, company_id, user_id, amount_xaf, status, campay_payout_ref, failure_reason, payout_duration_seconds, attempt_count, last_reconciled_at, next_retry_at, needs_admin_review, created_at, updated_at FROM advance_requests
+SELECT id, company_id, user_id, amount_xaf, status, campay_payout_ref, failure_reason, payout_duration_seconds, attempt_count, last_reconciled_at, next_retry_at, needs_admin_review, reissued_from_id, created_at, updated_at FROM advance_requests
 WHERE user_id = $1 AND status IN ('initiated', 'processing', 'pending')
 LIMIT 1
 `
@@ -100,6 +143,7 @@ func (q *Queries) GetActiveRequestByUserID(ctx context.Context, userID uuid.UUID
 		&i.LastReconciledAt,
 		&i.NextRetryAt,
 		&i.NeedsAdminReview,
+		&i.ReissuedFromID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -107,7 +151,7 @@ func (q *Queries) GetActiveRequestByUserID(ctx context.Context, userID uuid.UUID
 }
 
 const getAdvanceRequestByCampayRef = `-- name: GetAdvanceRequestByCampayRef :one
-SELECT id, company_id, user_id, amount_xaf, status, campay_payout_ref, failure_reason, payout_duration_seconds, attempt_count, last_reconciled_at, next_retry_at, needs_admin_review, created_at, updated_at FROM advance_requests WHERE campay_payout_ref = $1
+SELECT id, company_id, user_id, amount_xaf, status, campay_payout_ref, failure_reason, payout_duration_seconds, attempt_count, last_reconciled_at, next_retry_at, needs_admin_review, reissued_from_id, created_at, updated_at FROM advance_requests WHERE campay_payout_ref = $1
 `
 
 // Webhook resolves by Campay reference (globally unique); no company context.
@@ -127,6 +171,7 @@ func (q *Queries) GetAdvanceRequestByCampayRef(ctx context.Context, campayPayout
 		&i.LastReconciledAt,
 		&i.NextRetryAt,
 		&i.NeedsAdminReview,
+		&i.ReissuedFromID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -134,7 +179,7 @@ func (q *Queries) GetAdvanceRequestByCampayRef(ctx context.Context, campayPayout
 }
 
 const getAdvanceRequestByID = `-- name: GetAdvanceRequestByID :one
-SELECT id, company_id, user_id, amount_xaf, status, campay_payout_ref, failure_reason, payout_duration_seconds, attempt_count, last_reconciled_at, next_retry_at, needs_admin_review, created_at, updated_at FROM advance_requests WHERE id = $1
+SELECT id, company_id, user_id, amount_xaf, status, campay_payout_ref, failure_reason, payout_duration_seconds, attempt_count, last_reconciled_at, next_retry_at, needs_admin_review, reissued_from_id, created_at, updated_at FROM advance_requests WHERE id = $1
 `
 
 func (q *Queries) GetAdvanceRequestByID(ctx context.Context, id uuid.UUID) (AdvanceRequest, error) {
@@ -153,6 +198,7 @@ func (q *Queries) GetAdvanceRequestByID(ctx context.Context, id uuid.UUID) (Adva
 		&i.LastReconciledAt,
 		&i.NextRetryAt,
 		&i.NeedsAdminReview,
+		&i.ReissuedFromID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -160,7 +206,7 @@ func (q *Queries) GetAdvanceRequestByID(ctx context.Context, id uuid.UUID) (Adva
 }
 
 const listAdvanceRequestsByUserID = `-- name: ListAdvanceRequestsByUserID :many
-SELECT id, company_id, user_id, amount_xaf, status, campay_payout_ref, failure_reason, payout_duration_seconds, attempt_count, last_reconciled_at, next_retry_at, needs_admin_review, created_at, updated_at FROM advance_requests
+SELECT id, company_id, user_id, amount_xaf, status, campay_payout_ref, failure_reason, payout_duration_seconds, attempt_count, last_reconciled_at, next_retry_at, needs_admin_review, reissued_from_id, created_at, updated_at FROM advance_requests
 WHERE user_id = $1
 ORDER BY created_at DESC
 `
@@ -187,6 +233,7 @@ func (q *Queries) ListAdvanceRequestsByUserID(ctx context.Context, userID uuid.U
 			&i.LastReconciledAt,
 			&i.NextRetryAt,
 			&i.NeedsAdminReview,
+			&i.ReissuedFromID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -201,7 +248,7 @@ func (q *Queries) ListAdvanceRequestsByUserID(ctx context.Context, userID uuid.U
 }
 
 const listAdvanceRequestsWithUserByCompany = `-- name: ListAdvanceRequestsWithUserByCompany :many
-SELECT ar.id, ar.company_id, ar.user_id, ar.amount_xaf, ar.status, ar.campay_payout_ref, ar.failure_reason, ar.payout_duration_seconds, ar.attempt_count, ar.last_reconciled_at, ar.next_retry_at, ar.needs_admin_review, ar.created_at, ar.updated_at, u.email AS user_email
+SELECT ar.id, ar.company_id, ar.user_id, ar.amount_xaf, ar.status, ar.campay_payout_ref, ar.failure_reason, ar.payout_duration_seconds, ar.attempt_count, ar.last_reconciled_at, ar.next_retry_at, ar.needs_admin_review, ar.reissued_from_id, ar.created_at, ar.updated_at, u.email AS user_email
 FROM advance_requests ar
 JOIN users u ON ar.user_id = u.id
 WHERE ar.company_id = $1
@@ -228,6 +275,7 @@ type ListAdvanceRequestsWithUserByCompanyRow struct {
 	LastReconciledAt      sql.NullTime   `json:"last_reconciled_at"`
 	NextRetryAt           sql.NullTime   `json:"next_retry_at"`
 	NeedsAdminReview      bool           `json:"needs_admin_review"`
+	ReissuedFromID        pgtype.UUID    `json:"reissued_from_id"`
 	CreatedAt             time.Time      `json:"created_at"`
 	UpdatedAt             time.Time      `json:"updated_at"`
 	UserEmail             string         `json:"user_email"`
@@ -255,6 +303,7 @@ func (q *Queries) ListAdvanceRequestsWithUserByCompany(ctx context.Context, arg 
 			&i.LastReconciledAt,
 			&i.NextRetryAt,
 			&i.NeedsAdminReview,
+			&i.ReissuedFromID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.UserEmail,
@@ -269,6 +318,130 @@ func (q *Queries) ListAdvanceRequestsWithUserByCompany(ctx context.Context, arg 
 	return items, nil
 }
 
+const listReconcilableAdvanceRequests = `-- name: ListReconcilableAdvanceRequests :many
+SELECT id, company_id, user_id, amount_xaf, status, campay_payout_ref, failure_reason, payout_duration_seconds, attempt_count, last_reconciled_at, next_retry_at, needs_admin_review, reissued_from_id, created_at, updated_at FROM advance_requests
+WHERE needs_admin_review = FALSE
+  AND (
+    (status IN ('processing', 'pending') AND campay_payout_ref IS NOT NULL AND (next_retry_at IS NULL OR next_retry_at <= NOW()))
+    OR (status = 'processing' AND campay_payout_ref IS NULL)
+    OR (status = 'initiated' AND created_at <= NOW() - INTERVAL '60 seconds')
+  )
+ORDER BY created_at ASC
+`
+
+// Rows the reconciler must act on: ref'd processing/pending rows past their
+// next_retry_at (a NULL next_retry_at means "never yet scheduled" — treated
+// as due immediately so a row transitioned to processing/pending without
+// explicitly setting next_retry_at, e.g. the post-transfer-DB-update-failure
+// fallback in CreateRequest, is still picked up on the very next tick);
+// processing rows with no campay_payout_ref (pure timeout/crash, nothing to
+// poll — surfaced every tick, self-gated by the reconciler's own grace-period
+// check since polling isn't possible for this class); or initiated rows old
+// enough to be a process-crash artifact (debit committed, server died before
+// the Campay call returned). Excludes rows already flagged for a human.
+func (q *Queries) ListReconcilableAdvanceRequests(ctx context.Context) ([]AdvanceRequest, error) {
+	rows, err := q.db.Query(ctx, listReconcilableAdvanceRequests)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AdvanceRequest
+	for rows.Next() {
+		var i AdvanceRequest
+		if err := rows.Scan(
+			&i.ID,
+			&i.CompanyID,
+			&i.UserID,
+			&i.AmountXaf,
+			&i.Status,
+			&i.CampayPayoutRef,
+			&i.FailureReason,
+			&i.PayoutDurationSeconds,
+			&i.AttemptCount,
+			&i.LastReconciledAt,
+			&i.NextRetryAt,
+			&i.NeedsAdminReview,
+			&i.ReissuedFromID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const resolveAdvanceRequest = `-- name: ResolveAdvanceRequest :one
+UPDATE advance_requests SET needs_admin_review = FALSE, updated_at = NOW()
+WHERE id = $1 AND needs_admin_review = TRUE RETURNING id, company_id, user_id, amount_xaf, status, campay_payout_ref, failure_reason, payout_duration_seconds, attempt_count, last_reconciled_at, next_retry_at, needs_admin_review, reissued_from_id, created_at, updated_at
+`
+
+func (q *Queries) ResolveAdvanceRequest(ctx context.Context, id uuid.UUID) (AdvanceRequest, error) {
+	row := q.db.QueryRow(ctx, resolveAdvanceRequest, id)
+	var i AdvanceRequest
+	err := row.Scan(
+		&i.ID,
+		&i.CompanyID,
+		&i.UserID,
+		&i.AmountXaf,
+		&i.Status,
+		&i.CampayPayoutRef,
+		&i.FailureReason,
+		&i.PayoutDurationSeconds,
+		&i.AttemptCount,
+		&i.LastReconciledAt,
+		&i.NextRetryAt,
+		&i.NeedsAdminReview,
+		&i.ReissuedFromID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const updateAdvanceRequestReconcileAttempt = `-- name: UpdateAdvanceRequestReconcileAttempt :one
+UPDATE advance_requests SET
+    attempt_count = attempt_count + 1,
+    last_reconciled_at = NOW(),
+    next_retry_at = $2,
+    needs_admin_review = $3,
+    updated_at = NOW()
+WHERE id = $1 RETURNING id, company_id, user_id, amount_xaf, status, campay_payout_ref, failure_reason, payout_duration_seconds, attempt_count, last_reconciled_at, next_retry_at, needs_admin_review, reissued_from_id, created_at, updated_at
+`
+
+type UpdateAdvanceRequestReconcileAttemptParams struct {
+	ID               uuid.UUID    `json:"id"`
+	NextRetryAt      sql.NullTime `json:"next_retry_at"`
+	NeedsAdminReview bool         `json:"needs_admin_review"`
+}
+
+func (q *Queries) UpdateAdvanceRequestReconcileAttempt(ctx context.Context, arg UpdateAdvanceRequestReconcileAttemptParams) (AdvanceRequest, error) {
+	row := q.db.QueryRow(ctx, updateAdvanceRequestReconcileAttempt, arg.ID, arg.NextRetryAt, arg.NeedsAdminReview)
+	var i AdvanceRequest
+	err := row.Scan(
+		&i.ID,
+		&i.CompanyID,
+		&i.UserID,
+		&i.AmountXaf,
+		&i.Status,
+		&i.CampayPayoutRef,
+		&i.FailureReason,
+		&i.PayoutDurationSeconds,
+		&i.AttemptCount,
+		&i.LastReconciledAt,
+		&i.NextRetryAt,
+		&i.NeedsAdminReview,
+		&i.ReissuedFromID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const updateAdvanceRequestStatus = `-- name: UpdateAdvanceRequestStatus :one
 UPDATE advance_requests SET
     status = $2,
@@ -276,7 +449,7 @@ UPDATE advance_requests SET
     payout_duration_seconds = $4,
     campay_payout_ref = $5,
     updated_at = NOW()
-WHERE id = $1 RETURNING id, company_id, user_id, amount_xaf, status, campay_payout_ref, failure_reason, payout_duration_seconds, attempt_count, last_reconciled_at, next_retry_at, needs_admin_review, created_at, updated_at
+WHERE id = $1 RETURNING id, company_id, user_id, amount_xaf, status, campay_payout_ref, failure_reason, payout_duration_seconds, attempt_count, last_reconciled_at, next_retry_at, needs_admin_review, reissued_from_id, created_at, updated_at
 `
 
 type UpdateAdvanceRequestStatusParams struct {
@@ -309,6 +482,7 @@ func (q *Queries) UpdateAdvanceRequestStatus(ctx context.Context, arg UpdateAdva
 		&i.LastReconciledAt,
 		&i.NextRetryAt,
 		&i.NeedsAdminReview,
+		&i.ReissuedFromID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

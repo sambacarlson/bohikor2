@@ -21,3 +21,13 @@ ORDER BY c.created_at DESC;
 -- name: UpdateCompanyStatus :one
 UPDATE companies SET status = $2, updated_at = NOW()
 WHERE id = $1 RETURNING *;
+
+-- name: LockCompanyForFloatCheck :one
+-- Acquires a row lock on the company for the life of the caller's
+-- transaction, serializing concurrent float-affecting writes (advance
+-- debits, reissue debits) against the same company. A balance check made
+-- after this call, inside the same transaction, is guaranteed accurate:
+-- any concurrent transaction attempting the same lock blocks until this
+-- one commits or rolls back, and then observes this transaction's
+-- committed ledger writes under READ COMMITTED.
+SELECT id FROM companies WHERE id = $1 FOR UPDATE;

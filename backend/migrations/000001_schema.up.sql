@@ -138,6 +138,7 @@ CREATE TABLE advance_requests (
     last_reconciled_at TIMESTAMPTZ,
     next_retry_at TIMESTAMPTZ,
     needs_admin_review BOOLEAN NOT NULL DEFAULT FALSE,
+    reissued_from_id UUID UNIQUE REFERENCES advance_requests(id),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

@@ -278,6 +278,63 @@ func (h *PlatformHandler) TopUpCompany(c *gin.Context) {
 	})
 }
 
+// AdjustCompanyLedger posts a manual, signed `adjustment` ledger entry
+// (platform-admin only) for corrections — unlike TopUpCompany, the amount may
+// be negative; only an exactly-zero amount is rejected.
+func (h *PlatformHandler) AdjustCompanyLedger(c *gin.Context) {
+	companyID, ok := parseCompanyID(c)
+	if !ok {
+		return
+	}
+
+	var req struct {
+		AmountXaf string `json:"amount_xaf" binding:"required"`
+		Note      string `json:"note" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		JSONError(c, http.StatusBadRequest, "invalid_request", "amount_xaf and note are required")
+		return
+	}
+
+	var amount pgtype.Numeric
+	if err := amount.Scan(req.AmountXaf); err != nil {
+		JSONError(c, http.StatusBadRequest, "invalid_amount", "amount_xaf must be a valid number")
+		return
+	}
+	if !amount.Valid || amount.NaN || amount.Int == nil || amount.Int.Sign() == 0 {
+		JSONError(c, http.StatusBadRequest, "invalid_amount", "amount_xaf must not be zero")
+		return
+	}
+
+	if _, err := h.store.GetCompanyByID(c.Request.Context(), companyID); err != nil {
+		JSONError(c, http.StatusNotFound, "not_found", "company not found")
+		return
+	}
+
+	entry, err := h.store.CreateLedgerEntry(c.Request.Context(), db.CreateLedgerEntryParams{
+		CompanyID: companyID,
+		EntryType: "adjustment",
+		AmountXaf: amount,
+		CreatedBy: platformAdminUUID(c),
+		Note:      pgtype.Text{String: req.Note, Valid: true},
+	})
+	if err != nil {
+		slog.Error("create adjustment ledger entry", "error", err, "company_id", companyID)
+		JSONError(c, http.StatusInternalServerError, "internal_error", "failed to post adjustment")
+		return
+	}
+
+	balance, ok := h.balanceOrFail(c, companyID)
+	if !ok {
+		return
+	}
+
+	JSONSuccess(c, http.StatusCreated, gin.H{
+		"entry":       entry,
+		"balance_xaf": numericToString(balance),
+	})
+}
+
 func (h *PlatformHandler) ListCompanies(c *gin.Context) {
 	companies, err := h.store.ListCompaniesWithBalance(c.Request.Context())
 	if err != nil {

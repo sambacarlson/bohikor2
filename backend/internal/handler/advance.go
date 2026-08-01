@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -16,13 +17,16 @@ import (
 
 	db "github.com/Iknite-Space/bohikor2/db/sqlc"
 	"github.com/Iknite-Space/bohikor2/internal/campay"
+	"github.com/Iknite-Space/bohikor2/internal/service"
 )
 
 type advanceQuerier interface {
 	GetUserByID(ctx context.Context, id uuid.UUID) (db.User, error)
 	GetActiveRequestByUserID(ctx context.Context, userID uuid.UUID) (db.AdvanceRequest, error)
-	CreateAdvanceRequest(ctx context.Context, arg db.CreateAdvanceRequestParams) (db.AdvanceRequest, error)
-	UpdateAdvanceRequestStatus(ctx context.Context, arg db.UpdateAdvanceRequestStatusParams) (db.AdvanceRequest, error)
+	GetAdvanceRequestByID(ctx context.Context, id uuid.UUID) (db.AdvanceRequest, error)
+	GetCompanyBalance(ctx context.Context, companyID uuid.UUID) (pgtype.Numeric, error)
+	CreateAdvanceRequestWithDebit(ctx context.Context, arg db.CreateAdvanceRequestParams) (db.AdvanceRequest, error)
+	Transition(ctx context.Context, req db.AdvanceRequest, newStatus db.RequestStatus, opts service.TransitionOpts) (db.AdvanceRequest, error)
 	CreateEvent(ctx context.Context, arg db.CreateEventParams) (db.Event, error)
 	ListAdvanceRequestsByUserID(ctx context.Context, userID uuid.UUID) ([]db.AdvanceRequest, error)
 	CountAdvanceRequestsByUserToday(ctx context.Context, userID uuid.UUID) (int64, error)
@@ -200,7 +204,45 @@ func (h *AdvanceHandler) CreateRequest(c *gin.Context) {
 		JSONError(c, http.StatusInternalServerError, "internal_error", "invalid user ID")
 		return
 	}
+	h.processAdvanceRequest(c, userID)
+}
 
+// RetryRequest lets a user re-initiate a payout after a terminal failure,
+// creating a new request (fresh external_reference) rather than mutating the
+// failed one. Guarded by the same eligibility + float checks as CreateRequest.
+func (h *AdvanceHandler) RetryRequest(c *gin.Context) {
+	val, exists := c.Get("user_id")
+	if !exists {
+		JSONError(c, http.StatusUnauthorized, "unauthorized", "user not authenticated")
+		return
+	}
+	userID, ok := val.(uuid.UUID)
+	if !ok {
+		JSONError(c, http.StatusInternalServerError, "internal_error", "invalid user ID")
+		return
+	}
+
+	targetID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		JSONError(c, http.StatusBadRequest, "invalid_id", "invalid request id")
+		return
+	}
+
+	target, err := h.queries.GetAdvanceRequestByID(c.Request.Context(), targetID)
+	if err != nil || target.UserID != userID {
+		JSONError(c, http.StatusNotFound, "not_found", "advance request not found")
+		return
+	}
+
+	if target.Status != db.RequestStatusFailed {
+		JSONError(c, http.StatusConflict, "not_retryable", "only a terminally failed request can be retried")
+		return
+	}
+
+	h.processAdvanceRequest(c, userID)
+}
+
+func (h *AdvanceHandler) processAdvanceRequest(c *gin.Context, userID uuid.UUID) {
 	ctx := c.Request.Context()
 
 	user, err := h.queries.GetUserByID(ctx, userID)
@@ -272,13 +314,34 @@ func (h *AdvanceHandler) CreateRequest(c *gin.Context) {
 		return
 	}
 
-	newReq, err := h.queries.CreateAdvanceRequest(ctx, db.CreateAdvanceRequestParams{
+	balance, err := h.queries.GetCompanyBalance(ctx, user.CompanyID)
+	if err != nil {
+		slog.Error("get company balance", "error", err)
+		JSONError(c, http.StatusInternalServerError, "internal_error", "failed to check company balance")
+		return
+	}
+	balanceDec, err := numericToDecimal(balance)
+	if err != nil {
+		slog.Error("parse company balance", "error", err)
+		JSONError(c, http.StatusInternalServerError, "internal_error", "failed to check company balance")
+		return
+	}
+	if balanceDec.LessThan(ps.advanceAmount) {
+		JSONError(c, http.StatusForbidden, "insufficient_employer_float", "your employer's available float cannot cover this advance right now")
+		return
+	}
+
+	newReq, err := h.queries.CreateAdvanceRequestWithDebit(ctx, db.CreateAdvanceRequestParams{
 		CompanyID: user.CompanyID,
 		UserID:    userID,
 		AmountXaf: amount,
 		Status:    db.RequestStatusInitiated,
 	})
 	if err != nil {
+		if errors.Is(err, ErrInsufficientFloat) {
+			JSONError(c, http.StatusForbidden, "insufficient_employer_float", "your employer's available float cannot cover this advance right now")
+			return
+		}
 		slog.Error("create advance request", "error", err)
 		JSONError(c, http.StatusInternalServerError, "internal_error", "failed to create advance request")
 		return
@@ -295,105 +358,93 @@ func (h *AdvanceHandler) CreateRequest(c *gin.Context) {
 		Metadata:  metadata,
 	})
 
-	description := "Bohikor2 salary advance"
-	transferResp, transferErr := h.campayClient.InitiateTransfer(ctx, user.PhoneNumber.String, ps.advanceAmount, description, newReq.ID.String())
-
-	if transferErr != nil {
-		slog.Error("campay transfer failed", "error", transferErr, "request_id", newReq.ID)
-
-		failureReason := transferErr.Error()
-		updated, updateErr := h.queries.UpdateAdvanceRequestStatus(ctx, db.UpdateAdvanceRequestStatusParams{
-			ID:            newReq.ID,
-			Status:        db.RequestStatusFailed,
-			FailureReason: pgtype.Text{String: failureReason, Valid: true},
-		})
-		if updateErr != nil {
-			slog.Error("update request status to failed", "error", updateErr, "request_id", newReq.ID)
-		} else {
-			newReq = updated
-		}
-
-		failMeta, _ := json.Marshal(map[string]interface{}{
-			"request_id": newReq.ID,
-			"reason":     failureReason,
-		})
-		_, _ = h.queries.CreateEvent(ctx, db.CreateEventParams{
-			CompanyID: pgtype.UUID{Bytes: user.CompanyID, Valid: true},
-			UserID:    pgtype.UUID{Bytes: userID, Valid: true},
-			EventType: "payout_failed",
-			Metadata:  failMeta,
-		})
-
-		JSONError(c, http.StatusBadGateway, "transfer_failed", "failed to process transfer: "+failureReason)
-		return
-	}
-
-	now := time.Now()
-	elapsed := int32(now.Sub(newReq.CreatedAt).Seconds())
-
-	campayRef := pgtype.Text{String: transferResp.Reference, Valid: true}
-	if transferResp.Reference == "" {
-		campayRef = pgtype.Text{Valid: false}
-	}
-
-	var finalStatus db.RequestStatus
-	if transferResp.Status == "PENDING" {
-		finalStatus = db.RequestStatusPending
-	} else {
-		finalStatus = db.RequestStatusSuccess
-	}
-
-	updated, updateErr := h.queries.UpdateAdvanceRequestStatus(ctx, db.UpdateAdvanceRequestStatusParams{
-		ID:                    newReq.ID,
-		Status:                finalStatus,
-		CampayPayoutRef:       campayRef,
-		PayoutDurationSeconds: pgtype.Int4{Int32: elapsed, Valid: true},
-	})
-	if updateErr != nil {
-		slog.Error("update request status after transfer failed", "error", updateErr, "request_id", newReq.ID, "campay_ref", transferResp.Reference)
-
-		_, failErr := h.queries.UpdateAdvanceRequestStatus(ctx, db.UpdateAdvanceRequestStatusParams{
-			ID:                    newReq.ID,
-			Status:                db.RequestStatusFailed,
-			FailureReason:         pgtype.Text{String: "post-transfer DB update failed: " + updateErr.Error(), Valid: true},
-			CampayPayoutRef:       campayRef,
-			PayoutDurationSeconds: pgtype.Int4{Valid: false},
-		})
-		if failErr != nil {
-			slog.Error("failed to mark request as failed after transfer", "error", failErr, "request_id", newReq.ID)
-		}
-
+	finalReq, persisted := disburseAndResolve(ctx, h.queries, h.campayClient, newReq, user.PhoneNumber.String, ps.advanceAmount)
+	if !persisted {
 		JSONError(c, http.StatusInternalServerError, "internal_error", "failed to save request")
 		return
 	}
-	newReq = updated
 
-	if transferResp.Status == "PENDING" {
-		eventMeta, _ := json.Marshal(map[string]interface{}{
-			"request_id": newReq.ID,
-			"campay_ref": transferResp.Reference,
+	switch finalReq.Status {
+	case db.RequestStatusProcessing:
+		JSONSuccess(c, http.StatusAccepted, finalReq)
+	case db.RequestStatusFailed:
+		JSONError(c, http.StatusBadGateway, "transfer_failed", "failed to process transfer: "+finalReq.FailureReason.String)
+	default:
+		JSONSuccess(c, http.StatusCreated, finalReq)
+	}
+}
+
+// payoutTransitioner is the subset of advanceQuerier that disburseAndResolve
+// needs — kept minimal so AdminRequestsHandler (which has its own store
+// interface) can also satisfy it.
+type payoutTransitioner interface {
+	Transition(ctx context.Context, req db.AdvanceRequest, newStatus db.RequestStatus, opts service.TransitionOpts) (db.AdvanceRequest, error)
+}
+
+// disburseAndResolve calls Campay to disburse a freshly-debited request and
+// maps the outcome via Transition, matching design §2's rules: transport
+// error (no structured Campay response) -> processing; Campay-declined
+// (structured FAILED response) -> failed (+ledger reversal via Transition);
+// SUCCESSFUL/PENDING -> success/pending. If the post-transfer Transition call
+// itself fails (our DB, not Campay), the row is force-marked processing
+// instead of failed, since Campay already told us money moved or may have.
+// persisted is false whenever a Transition write itself failed — including
+// this force-to-processing fallback and the earlier processing/failed writes
+// — signalling the caller that the request's outcome could not be durably
+// recorded and deserves its own error response rather than being folded into
+// a normal processing/202 or failed/502. Shared by processAdvanceRequest
+// (employee create/retry) and
+// AdminRequestsHandler.Reissue (admin-forced reissue) so both outbound-
+// payment paths agree on outcome handling.
+func disburseAndResolve(ctx context.Context, q payoutTransitioner, campayClient campayTransferer, req db.AdvanceRequest, phoneNumber string, amount decimal.Decimal) (result db.AdvanceRequest, persisted bool) {
+	description := "Bohikor2 salary advance"
+	transferResp, transferErr := campayClient.InitiateTransfer(ctx, phoneNumber, amount, description, req.ID.String())
+
+	if transferErr != nil && transferResp == nil {
+		slog.Error("campay transfer transport error", "error", transferErr, "request_id", req.ID)
+		updated, transErr := q.Transition(ctx, req, db.RequestStatusProcessing, service.TransitionOpts{
+			FailureReason: transferErr.Error(),
 		})
-		_, _ = h.queries.CreateEvent(ctx, db.CreateEventParams{
-			CompanyID: pgtype.UUID{Bytes: user.CompanyID, Valid: true},
-			UserID:    pgtype.UUID{Bytes: userID, Valid: true},
-			EventType: "payout_pending",
-			Metadata:  eventMeta,
-		})
-	} else {
-		eventMeta, _ := json.Marshal(map[string]interface{}{
-			"request_id":              newReq.ID,
-			"campay_ref":              transferResp.Reference,
-			"payout_duration_seconds": elapsed,
-		})
-		_, _ = h.queries.CreateEvent(ctx, db.CreateEventParams{
-			CompanyID: pgtype.UUID{Bytes: user.CompanyID, Valid: true},
-			UserID:    pgtype.UUID{Bytes: userID, Valid: true},
-			EventType: "payout_success",
-			Metadata:  eventMeta,
-		})
+		if transErr != nil {
+			slog.Error("transition to processing failed", "error", transErr, "request_id", req.ID)
+			return req, false
+		}
+		return updated, true
 	}
 
-	JSONSuccess(c, http.StatusCreated, newReq)
+	if transferErr != nil {
+		slog.Error("campay transfer declined", "error", transferErr, "request_id", req.ID)
+		updated, transErr := q.Transition(ctx, req, db.RequestStatusFailed, service.TransitionOpts{
+			FailureReason:   transferErr.Error(),
+			CampayPayoutRef: transferResp.Reference,
+		})
+		if transErr != nil {
+			slog.Error("transition to failed failed", "error", transErr, "request_id", req.ID)
+			return req, false
+		}
+		return updated, true
+	}
+
+	finalStatus := db.RequestStatusSuccess
+	if transferResp.Status == "PENDING" {
+		finalStatus = db.RequestStatusPending
+	}
+	updated, updateErr := q.Transition(ctx, req, finalStatus, service.TransitionOpts{
+		CampayPayoutRef: transferResp.Reference,
+	})
+	if updateErr != nil {
+		slog.Error("transition after transfer failed", "error", updateErr, "request_id", req.ID, "campay_ref", transferResp.Reference)
+		procUpdated, procErr := q.Transition(ctx, req, db.RequestStatusProcessing, service.TransitionOpts{
+			FailureReason:   "post-transfer DB update failed, deferred to reconciler: " + updateErr.Error(),
+			CampayPayoutRef: transferResp.Reference,
+		})
+		if procErr != nil {
+			slog.Error("failed to mark request as processing after transfer", "error", procErr, "request_id", req.ID)
+			return req, false
+		}
+		return procUpdated, false
+	}
+	return updated, true
 }
 
 // GetEligibility evaluates all pre-conditions (kill switch, request window,
@@ -455,6 +506,14 @@ func (h *AdvanceHandler) GetEligibility(c *gin.Context) {
 	}
 	if monthlyMsg != "" {
 		reasons = append(reasons, monthlyMsg)
+		eligible = false
+	}
+
+	balance, balErr := h.queries.GetCompanyBalance(ctx, user.CompanyID)
+	if balErr != nil {
+		slog.Error("get company balance for eligibility", "error", balErr)
+	} else if balanceDec, err := numericToDecimal(balance); err == nil && balanceDec.LessThan(ps.advanceAmount) {
+		reasons = append(reasons, "insufficient_employer_float")
 		eligible = false
 	}
 
@@ -561,7 +620,8 @@ func HandleListAdminRequests(q adminRequestsQuerier) gin.HandlerFunc {
 
 type webhookQuerier interface {
 	GetAdvanceRequestByCampayRef(ctx context.Context, campayPayoutRef pgtype.Text) (db.AdvanceRequest, error)
-	UpdateAdvanceRequestStatus(ctx context.Context, arg db.UpdateAdvanceRequestStatusParams) (db.AdvanceRequest, error)
+	GetAdvanceRequestByID(ctx context.Context, id uuid.UUID) (db.AdvanceRequest, error)
+	Transition(ctx context.Context, req db.AdvanceRequest, newStatus db.RequestStatus, opts service.TransitionOpts) (db.AdvanceRequest, error)
 	GetPhoneVerificationByCampayRef(ctx context.Context, campayPayoutRef pgtype.Text) (db.PhoneVerification, error)
 	UpdatePhoneVerificationStatus(ctx context.Context, arg db.UpdatePhoneVerificationStatusParams) (db.PhoneVerification, error)
 	SetPhoneVerified(ctx context.Context, id uuid.UUID) (db.User, error)
@@ -618,6 +678,13 @@ func (h *webhookHandler) HandleCampayWebhook(c *gin.Context) {
 	campayRef := pgtype.Text{String: wh.Reference, Valid: true}
 
 	advanceReq, advanceErr := h.queries.GetAdvanceRequestByCampayRef(c.Request.Context(), campayRef)
+	if advanceErr != nil && wh.ExternalReference != "" {
+		if id, parseErr := uuid.Parse(wh.ExternalReference); parseErr == nil {
+			if byExtRef, extErr := h.queries.GetAdvanceRequestByID(c.Request.Context(), id); extErr == nil {
+				advanceReq, advanceErr = byExtRef, nil
+			}
+		}
+	}
 	if advanceErr == nil {
 		h.handleAdvanceWebhook(c, advanceReq, wh)
 		return
@@ -635,14 +702,14 @@ func (h *webhookHandler) HandleCampayWebhook(c *gin.Context) {
 
 func (h *webhookHandler) handleAdvanceWebhook(c *gin.Context, existing db.AdvanceRequest, wh campay.WebhookPayload) {
 	var newStatus db.RequestStatus
-	var failureReason pgtype.Text
+	var failureReason string
 	switch wh.Status {
 	case "SUCCESSFUL":
 		newStatus = db.RequestStatusSuccess
 	case "FAILED":
 		newStatus = db.RequestStatusFailed
 		if wh.Reason != "" && wh.Reason != "None" {
-			failureReason = pgtype.Text{String: wh.Reason, Valid: true}
+			failureReason = wh.Reason
 		}
 	case "PENDING":
 		newStatus = db.RequestStatusPending
@@ -652,45 +719,13 @@ func (h *webhookHandler) handleAdvanceWebhook(c *gin.Context, existing db.Advanc
 		return
 	}
 
-	now := time.Now()
-	elapsed := int32(now.Sub(existing.CreatedAt).Seconds())
-
-	_, err := h.queries.UpdateAdvanceRequestStatus(c.Request.Context(), db.UpdateAdvanceRequestStatusParams{
-		ID:                    existing.ID,
-		Status:                newStatus,
-		FailureReason:         failureReason,
-		PayoutDurationSeconds: pgtype.Int4{Int32: elapsed, Valid: true},
-	})
-	if err != nil {
-		slog.Error("update request status from webhook", "error", err, "reference", wh.Reference)
+	if _, err := h.queries.Transition(c.Request.Context(), existing, newStatus, service.TransitionOpts{
+		FailureReason:   failureReason,
+		CampayPayoutRef: wh.Reference,
+	}); err != nil {
+		slog.Error("transition request from webhook", "error", err, "reference", wh.Reference)
 		JSONError(c, http.StatusInternalServerError, "internal_error", "failed to update request")
 		return
-	}
-
-	if existing.Status != newStatus {
-		companyID := pgtype.UUID{Bytes: existing.CompanyID, Valid: true}
-		userID := pgtype.UUID{Bytes: existing.UserID, Valid: true}
-		eventMeta, _ := json.Marshal(map[string]interface{}{
-			"request_id":              existing.ID.String(),
-			"campay_ref":              wh.Reference,
-			"payout_duration_seconds": elapsed,
-		})
-		switch newStatus {
-		case db.RequestStatusSuccess:
-			_, _ = h.queries.CreateEvent(c.Request.Context(), db.CreateEventParams{
-				CompanyID: companyID,
-				UserID:    userID,
-				EventType: "payout_success",
-				Metadata:  eventMeta,
-			})
-		case db.RequestStatusFailed:
-			_, _ = h.queries.CreateEvent(c.Request.Context(), db.CreateEventParams{
-				CompanyID: companyID,
-				UserID:    userID,
-				EventType: "payout_failed",
-				Metadata:  eventMeta,
-			})
-		}
 	}
 
 	JSONOK(c, http.StatusOK)
@@ -837,4 +872,34 @@ func itoa(n int) string {
 		buf[i] = '-'
 	}
 	return string(buf[i:])
+}
+
+// numericToDecimal converts a pgtype.Numeric to decimal.Decimal for arithmetic
+// and comparisons that pgtype.Numeric doesn't support directly.
+func numericToDecimal(n pgtype.Numeric) (decimal.Decimal, error) {
+	if !n.Valid {
+		return decimal.Zero, nil
+	}
+	v, err := n.Value()
+	if err != nil {
+		return decimal.Decimal{}, err
+	}
+	s, ok := v.(string)
+	if !ok || s == "" {
+		return decimal.Zero, nil
+	}
+	return decimal.NewFromString(s)
+}
+
+// negateNumeric flips the sign of a positive advance amount into a ledger debit.
+func negateNumeric(n pgtype.Numeric) (pgtype.Numeric, error) {
+	d, err := numericToDecimal(n)
+	if err != nil {
+		return pgtype.Numeric{}, err
+	}
+	var negated pgtype.Numeric
+	if err := negated.Scan(d.Neg().String()); err != nil {
+		return pgtype.Numeric{}, err
+	}
+	return negated, nil
 }

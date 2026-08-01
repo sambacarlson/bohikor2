@@ -211,6 +211,7 @@ type AdvanceRequest struct {
 	LastReconciledAt      sql.NullTime   `json:"last_reconciled_at"`
 	NextRetryAt           sql.NullTime   `json:"next_retry_at"`
 	NeedsAdminReview      bool           `json:"needs_admin_review"`
+	ReissuedFromID        pgtype.UUID    `json:"reissued_from_id"`
 	CreatedAt             time.Time      `json:"created_at"`
 	UpdatedAt             time.Time      `json:"updated_at"`
 }

@@ -69,6 +69,18 @@ type WebhookPayload struct {
 	Reason            string `json:"reason"`
 }
 
+type TransactionStatusResponse struct {
+	Reference         string `json:"reference"`
+	Status            string `json:"status"`
+	Amount            string `json:"amount,omitempty"`
+	Currency          string `json:"currency,omitempty"`
+	Operator          string `json:"operator,omitempty"`
+	Code              string `json:"code,omitempty"`
+	OperatorReference string `json:"operator_reference,omitempty"`
+	ExternalReference string `json:"external_reference,omitempty"`
+	Reason            string `json:"reason,omitempty"`
+}
+
 type campayClaims struct {
 	jwt.StandardClaims
 	Source string `json:"source"`
@@ -196,6 +208,38 @@ func (c *Client) InitiateCollection(ctx context.Context, phoneNumber string, amo
 	}
 
 	return &cr, nil
+}
+
+// GetTransactionStatus polls GET /transaction/{reference}/. reference must be
+// Campay's own reference (the value returned in TransferResponse/CollectResponse),
+// never our external_reference — confirmed against Campay's docs and official SDK.
+func (c *Client) GetTransactionStatus(ctx context.Context, reference string) (*TransactionStatusResponse, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/transaction/"+reference+"/", nil)
+	if err != nil {
+		return nil, fmt.Errorf("create status request: %w", err)
+	}
+	req.Header.Set("Authorization", "Token "+c.permanentToken)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("status request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read status response: %w", err)
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("status request failed: status=%d body=%s", resp.StatusCode, string(respBody))
+	}
+
+	var sr TransactionStatusResponse
+	if err := json.Unmarshal(respBody, &sr); err != nil {
+		return nil, fmt.Errorf("unmarshal status response: %w", err)
+	}
+	return &sr, nil
 }
 
 func (c *Client) VerifyWebhook(token string) bool {

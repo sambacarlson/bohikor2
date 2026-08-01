@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/shopspring/decimal"
 
 	db "github.com/Iknite-Space/bohikor2/db/sqlc"
 	"github.com/Iknite-Space/bohikor2/internal/campay"
@@ -401,6 +402,80 @@ func TestCreateRequest_MonthlyLimitReached(t *testing.T) {
 	}
 }
 
+func TestCreateRequest_InsufficientFloat_Returns403(t *testing.T) {
+	uid := uuid.New()
+	var lowBalance pgtype.Numeric
+	if err := lowBalance.Scan("100"); err != nil {
+		t.Fatalf("scan balance: %v", err)
+	}
+	q := &mockAdvanceQuerier{user: eligibleUser(uid), balance: lowBalance}
+	h := NewAdvanceHandler(q, &mockCampayTransferer{}, &mockAdvanceSettingsQuerier{}, time.UTC)
+	w := runCreateRequest(h, uid, `{}`)
+	if w.Code != http.StatusForbidden || codeOf(t, w.Body.Bytes()) != "insufficient_employer_float" {
+		t.Fatalf("expected 403 insufficient_employer_float, got %d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestGetEligibility_InsufficientFloatBlocks(t *testing.T) {
+	uid := uuid.New()
+	var lowBalance pgtype.Numeric
+	if err := lowBalance.Scan("100"); err != nil {
+		t.Fatalf("scan balance: %v", err)
+	}
+	q := &mockAdvanceQuerier{user: eligibleUser(uid), balance: lowBalance}
+	h := NewAdvanceHandler(q, &mockCampayTransferer{}, &mockAdvanceSettingsQuerier{}, time.UTC)
+	w := runEligibility(h, uid)
+	data := mustUnmarshalData(t, w.Body.Bytes())
+	if data["eligible"] != false {
+		t.Fatalf("expected not eligible when employer float is insufficient")
+	}
+	reasons, _ := data["reasons"].([]interface{})
+	found := false
+	for _, r := range reasons {
+		if r.(string) == "insufficient_employer_float" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected insufficient_employer_float reason, got %v", reasons)
+	}
+}
+
+func TestCreateRequest_GetCompanyBalanceError(t *testing.T) {
+	uid := uuid.New()
+	q := &mockAdvanceQuerier{user: eligibleUser(uid), balanceErr: errors.New("db down")}
+	h := NewAdvanceHandler(q, &mockCampayTransferer{}, &mockAdvanceSettingsQuerier{}, time.UTC)
+	w := runCreateRequest(h, uid, `{}`)
+	if w.Code != http.StatusInternalServerError || codeOf(t, w.Body.Bytes()) != "internal_error" {
+		t.Fatalf("expected 500 internal_error when GetCompanyBalance fails, got %d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestCreateRequest_ParseCompanyBalanceError(t *testing.T) {
+	uid := uuid.New()
+	// A NaN numeric scans as Valid with no error, but numericToDecimal's
+	// downstream decimal.NewFromString("NaN") fails to parse it — this is the
+	// cheapest way to reach the "parse company balance" error branch, which is
+	// otherwise unreachable via a plain DB error (that's balanceErr, covered above).
+	unparseable := pgtype.Numeric{Valid: true, NaN: true}
+	q := &mockAdvanceQuerier{user: eligibleUser(uid), balance: unparseable}
+	h := NewAdvanceHandler(q, &mockCampayTransferer{}, &mockAdvanceSettingsQuerier{}, time.UTC)
+	w := runCreateRequest(h, uid, `{}`)
+	if w.Code != http.StatusInternalServerError || codeOf(t, w.Body.Bytes()) != "internal_error" {
+		t.Fatalf("expected 500 internal_error when company balance can't be parsed, got %d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestNumericToDecimal_InvalidReturnsZero(t *testing.T) {
+	d, err := numericToDecimal(pgtype.Numeric{Valid: false})
+	if err != nil {
+		t.Fatalf("expected no error for an invalid numeric, got %v", err)
+	}
+	if !d.Equal(decimal.Zero) {
+		t.Fatalf("expected decimal.Zero for an invalid numeric, got %s", d.String())
+	}
+}
+
 func TestCreateRequest_CreateError(t *testing.T) {
 	uid := uuid.New()
 	q := &mockAdvanceQuerier{user: eligibleUser(uid), createErr: errors.New("db down")}
@@ -421,6 +496,12 @@ func TestCreateRequest_PostTransferUpdateError(t *testing.T) {
 	w := runCreateRequest(h, uid, `{}`)
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("expected 500 on post-transfer update failure, got %d: %s", w.Code, w.Body.String())
+	}
+	// Campay already confirmed SUCCESSFUL — the fallback must land on `processing`,
+	// never `failed`, or TransitionRequest would post a ledger reversal for a
+	// payout that actually went through (see task-3 review finding 1).
+	if q.lastTransitionStatus != db.RequestStatusProcessing {
+		t.Fatalf("expected fallback transition to processing (not failed) to avoid a bogus ledger reversal, got %s", q.lastTransitionStatus)
 	}
 }
 
@@ -528,12 +609,84 @@ func TestAdvanceWebhook_UnknownStatus(t *testing.T) {
 
 func TestAdvanceWebhook_UpdateError(t *testing.T) {
 	q := &mockWebhookQuerier{
-		request:   &db.AdvanceRequest{ID: uuid.New(), Status: db.RequestStatusPending},
-		updateErr: errors.New("db down"),
+		request:       &db.AdvanceRequest{ID: uuid.New(), Status: db.RequestStatusPending},
+		transitionErr: errors.New("db down"),
 	}
 	h := NewWebhookHandler(q, &mockWebhookVerifier{valid: true})
 	w := postWebhook(h, `{"reference":"ref-1","status":"SUCCESSFUL","signature":"valid-jwt"}`)
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("expected 500, got %d", w.Code)
+	}
+}
+
+func TestRetryRequest_NotFound(t *testing.T) {
+	uid := uuid.New()
+	q := &mockAdvanceQuerier{user: eligibleUser(uid), byIDErr: errTestNotFound}
+	h := NewAdvanceHandler(q, &mockCampayTransferer{}, &mockAdvanceSettingsQuerier{}, time.UTC)
+	r := makeTestGin()
+	r.POST("/api/advance-requests/:id/retry", func(c *gin.Context) {
+		setUserContext(c, uid)
+		h.RetryRequest(c)
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequestWithContext(context.Background(), "POST", "/api/advance-requests/"+uuid.NewString()+"/retry", nil)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", w.Code)
+	}
+}
+
+func TestRetryRequest_NotTerminalFailed(t *testing.T) {
+	uid := uuid.New()
+	target := db.AdvanceRequest{ID: uuid.New(), UserID: uid, Status: db.RequestStatusPending}
+	q := &mockAdvanceQuerier{user: eligibleUser(uid), byID: &target}
+	h := NewAdvanceHandler(q, &mockCampayTransferer{}, &mockAdvanceSettingsQuerier{}, time.UTC)
+	r := makeTestGin()
+	r.POST("/api/advance-requests/:id/retry", func(c *gin.Context) {
+		setUserContext(c, uid)
+		h.RetryRequest(c)
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequestWithContext(context.Background(), "POST", "/api/advance-requests/"+target.ID.String()+"/retry", nil)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d", w.Code)
+	}
+}
+
+func TestRetryRequest_WrongUser(t *testing.T) {
+	uid := uuid.New()
+	target := db.AdvanceRequest{ID: uuid.New(), UserID: uuid.New(), Status: db.RequestStatusFailed}
+	q := &mockAdvanceQuerier{user: eligibleUser(uid), byID: &target}
+	h := NewAdvanceHandler(q, &mockCampayTransferer{}, &mockAdvanceSettingsQuerier{}, time.UTC)
+	r := makeTestGin()
+	r.POST("/api/advance-requests/:id/retry", func(c *gin.Context) {
+		setUserContext(c, uid)
+		h.RetryRequest(c)
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequestWithContext(context.Background(), "POST", "/api/advance-requests/"+target.ID.String()+"/retry", nil)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 (no cross-user leak), got %d", w.Code)
+	}
+}
+
+func TestRetryRequest_TerminalFailed_CreatesNewRequest(t *testing.T) {
+	uid := uuid.New()
+	target := db.AdvanceRequest{ID: uuid.New(), UserID: uid, Status: db.RequestStatusFailed}
+	q := &mockAdvanceQuerier{user: eligibleUser(uid), byID: &target}
+	transferMock := &mockCampayTransferer{transferResp: &campay.TransferResponse{Reference: "retry-ref", Status: "SUCCESSFUL"}}
+	h := NewAdvanceHandler(q, transferMock, &mockAdvanceSettingsQuerier{}, time.UTC)
+	r := makeTestGin()
+	r.POST("/api/advance-requests/:id/retry", func(c *gin.Context) {
+		setUserContext(c, uid)
+		h.RetryRequest(c)
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequestWithContext(context.Background(), "POST", "/api/advance-requests/"+target.ID.String()+"/retry", nil)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
 	}
 }
