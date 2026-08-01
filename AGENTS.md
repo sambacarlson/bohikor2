@@ -99,14 +99,23 @@ Mobile requires a dev client build (`npx expo run:android/ios`). No Firebase nat
 
 **Edge cases:** User already exists → route to login. Invite accepted but PIN not created → route to create PIN. Suspended user → blocked. Locked user → blocked until admin unlocks.
 
-## Request Flow (Epic 2 — Complete)
+## Request Flow (Epic 2, hardened in Epic 7 — Complete)
 
 1. User taps "Request Advance" → confirmation modal
-2. Backend checks: user active, phone verified, terms accepted, no in-flight request
-3. `POST /api/advance-requests` → creates request, calls Campay Withdraw API (`POST /withdraw/`)
-4. Campay processes → sends webhook to `POST /api/webhooks/campay`
-5. Backend verifies JWT signature, updates request status
-6. User sees status in transaction history
+2. Backend checks: user active, phone verified, terms accepted, no in-flight request, kill switch,
+   request window, daily/monthly limits, **company float ≥ advance amount**
+3. `POST /api/advance-requests` → in one DB transaction (row-locked on the company to keep the
+   float check atomic under concurrent requests), creates the request (`initiated`) and posts a
+   `payout_debit` ledger entry reserving the float; then calls Campay's Withdraw API (`POST /withdraw/`)
+4. Campay's response maps to a status: `SUCCESSFUL`/`PENDING` → `success`/`pending`; declined →
+   `failed` (+ ledger reversal); timeout/transport error (no response at all) → `processing` —
+   **never** `failed` for an unconfirmed outcome
+5. Campay's async confirmation arrives via `POST /v1/webhooks/campay` (JWT-signed); a background
+   reconciler also polls `processing`/`pending` rows on a backoff schedule, so a lost webhook or
+   timeout doesn't strand a request
+6. User sees status in transaction history; a terminally `failed` request can be retried
+   (`POST /api/advance-requests/:id/retry`) or, by a company admin, reconciled/resolved/reissued
+   (`POST /api/admin/requests/:id/{reconcile,resolve,reissue}`)
 
 **Terms:** Must be accepted before requesting. Separate screen from auth. Stored on `users.is_terms_accepted`.
 

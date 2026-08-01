@@ -9,8 +9,8 @@ architecture detail and command references that complement it rather than repeat
 ## Current state (2026, mid-pivot)
 
 The project is a single-company salary-advance app **pivoting to multi-tenant** per `PLAN.md`
-(Epics 6–9). Epic 6 (multi-tenant backend) is done on `epic-6-multi-tenant-foundation`. Concretely
-this means:
+(Epics 6–9). Epic 6 (multi-tenant backend) and Epic 7 (payout reliability & float) are both done,
+merged to `main`. Concretely this means:
 
 - Every domain table now has `company_id`; a `companies` table and `platform_admins` (global
   super-admins) exist alongside the original `admins`/`users`.
@@ -98,10 +98,32 @@ sourced from the JWT claim (via the middleware-set context value), never from th
 `platform_admin` is the one subject type with no `company_id` (empty claim) and is gated by
 `RequirePlatformAdmin` instead.
 
-**Payout/webhook flow** (`advance.go`, `internal/campay`): synchronous call to Campay's Withdraw API
-at request time, async confirmation via `POST /v1/webhooks/campay` (JWT-signed, HS256). Epic 7 (not
-yet implemented) will add a reconciler and a `processing` state so a lost webhook or timeout no longer
-strands a request — see `PLAN.md`'s state-machine diagram before touching request-status transitions.
+**Payout/webhook flow** (`advance.go`, `internal/campay`): `CreateRequest` and `RetryRequest` both
+route through `processAdvanceRequest`, which checks the **isolation guarantee**'s tenancy scoping
+plus eligibility (kill switch, request window, daily/monthly limits, company float), then debits
+float and creates the request row in one DB transaction (`RealAdvanceStore.CreateAdvanceRequestWithDebit`,
+which also takes a `SELECT ... FOR UPDATE` row lock on the company to keep the float check atomic
+under concurrent requests) before calling Campay's Withdraw API. The Campay outcome is mapped by
+the shared `disburseAndResolve` helper: `SUCCESSFUL`/`PENDING` → `success`/`pending`; a
+Campay-declined transfer → `failed` (+ ledger reversal); a transport error/timeout (no response at
+all) → `processing`, **never** `failed` — the whole point of `processing` is that we don't yet know
+if money moved. Async confirmation arrives via `POST /v1/webhooks/campay` (JWT-signed, HS256),
+routed through the same shared `service.TransitionRequest` helper (`internal/service/payout.go`)
+that the webhook, the reconciler, and admin actions all call — it is the single place that mutates
+`advance_requests.status`, posts the ledger reversal on a transition to `failed`, and makes
+terminal statuses (`success`/`failed`) immutable once reached.
+
+A background reconciler (`internal/reconciler/`, started in `server.New`, stopped on graceful
+shutdown) polls `processing`/`pending` rows with a `campay_payout_ref` via
+`campay.Client.GetTransactionStatus` on a 30s tick with backoff (30s/1m/2m/5m/15m), escalating to
+`needs_admin_review` after 5 attempts. Rows with no ref (a pure timeout — nothing to poll) instead
+get a 10-minute grace period before the same escalation, relying on the webhook's
+`external_reference` fallback lookup to resolve them if Campay's confirmation arrives late.
+Recovery paths: `POST /api/advance-requests/:id/retry` (employee, only on a terminally `failed`
+request) creates a fresh row through the same eligibility+float+Campay flow; company admins get
+`POST /api/admin/requests/:id/{reconcile,resolve,reissue}` (force an immediate poll; clear a
+`needs_admin_review` flag with an audited note; or re-debit and re-disburse via Campay for a
+`failed` request, blocked from double-reissue by a DB unique constraint on `reissued_from_id`).
 
 ## Frontend architecture
 

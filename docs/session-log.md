@@ -1,5 +1,82 @@
 # Session Log
 
+## 2026-08-01 — Epic 7: Payout reliability & float (backend) (Complete)
+
+### What we did
+- **`TransitionRequest`** (`internal/service/payout.go`) — the single place that mutates
+  `advance_requests.status`: posts the `reversal` ledger entry on any transition to `failed`,
+  emits `payout_success`/`payout_failed` events, and no-ops on an already-terminal row so the
+  webhook, the reconciler, and admin actions can't double-post a reversal or race each other.
+  `CreateRequest`, `RetryRequest`, the webhook handler, and the reconciler all route through it
+  instead of hand-rolling status updates.
+- **Ledger-gated payout** — `RealAdvanceStore.CreateAdvanceRequestWithDebit` creates the request
+  row and posts a `payout_debit` ledger entry in one transaction, with a `SELECT ... FOR UPDATE`
+  row lock on the company (`LockCompanyForFloatCheck`) so the float check is atomic under
+  concurrent requests — re-checking the balance without the lock does not close the race under
+  Postgres' default READ COMMITTED isolation. Campay outcomes map through a new shared
+  `disburseAndResolve` helper: transport error/timeout → `processing` (never `failed` — we don't
+  yet know if money moved); declined → `failed` + reversal; success/pending pass through.
+- **`GetTransactionStatus`** (`internal/campay/client.go`) — polls `GET /transaction/{reference}/`.
+  Confirmed against Campay's docs and official Python SDK that this endpoint accepts only
+  Campay's own `reference`, never our `external_reference` — a real, separate bug in the existing
+  webhook handler was found during this research (a webhook arriving for a `campay_payout_ref`-less
+  row was silently dropped as "unknown reference") and fixed with an `external_reference` fallback
+  lookup.
+- **Reconciler** (`internal/reconciler/`) — background goroutine, 30s tick, started in
+  `server.New` and stopped on graceful shutdown. Polls ref'd `processing`/`pending` rows on a
+  backoff ladder (30s/1m/2m/5m/15m), escalating to `needs_admin_review` after 5 attempts; rows
+  with no ref (nothing pollable) get a 10-minute grace period before the same escalation instead.
+- **Recovery endpoints** — `POST /api/advance-requests/:id/retry` (employee, terminally-failed
+  only, re-runs the full eligibility+float+Campay flow); `POST /api/admin/requests/:id/{reconcile,resolve,reissue}`
+  (company admin — force a poll; clear `needs_admin_review` with an audited note; or re-debit and
+  re-disburse via Campay for a `failed` request, guarded against double-reissue by a DB unique
+  constraint on the new `reissued_from_id` column).
+- **`POST /api/platform/companies/:id/ledger/adjustment`** — platform-admin manual ledger
+  correction, mirroring the existing `ledger/topup` route.
+- **Schema** — `advance_requests.reissued_from_id UUID UNIQUE REFERENCES advance_requests(id)`,
+  additive to the single `000001` baseline per repo convention.
+
+### Bugs found and fixed along the way
+- **Money-correctness**: the original post-transfer-DB-write-failure fallback forced a request to
+  `failed` even when Campay had already confirmed success, which would have posted an erroneous
+  ledger reversal for a payout that actually went through — fixed to target `processing` instead.
+- **Cross-tenant IDOR**: the admin reconcile/resolve/reissue endpoints didn't check that the
+  target row belonged to the acting admin's own company, letting an admin act on — and reissue
+  (debit) — another company's request. Fixed with a `companyIDFromContext` load-then-check
+  pattern, 404 on mismatch.
+- **Reconciler query gaps** (two rounds): `ListReconcilableAdvanceRequests` initially missed
+  `processing` rows with no ref and a NULL `next_retry_at`, then a second sibling gap for ref'd
+  rows in the same state — both closed with regression tests.
+- **Final whole-branch review** caught one more Critical issue after all ten tasks were "done":
+  the admin **reissue** endpoint debited float and created a new row but never actually called
+  Campay, permanently stranding the row at `initiated` and blocking the employee from any new
+  request. Fixed by extracting the Campay-call-and-outcome-mapping logic into a shared
+  `disburseAndResolve` helper and reusing it in reissue. Also fixed in the same pass: the float
+  check's TOCTOU race (needed the row lock described above — a naive re-check inside the debit
+  transaction does not close it); `TransitionRequest`'s no-op guard only blocked re-delivery of
+  the *same* terminal status, not a flip between two different terminal statuses; two admin
+  endpoints (`resolve` on a non-flagged row, double-reissue) returned a generic 500 instead of a
+  clean 409. A scoped re-review — independently re-running the tests, not just reading the fix
+  report — confirmed all of these closed, and caught one more Minor issue in the fix itself
+  (`disburseAndResolve` reporting the wrong HTTP status in two rare DB-write-failure sub-cases),
+  fixed immediately.
+
+### Tests & checks
+- New: a two-goroutine concurrency test proving the float-check race is actually closed (two
+  concurrent debits against a shared balance — exactly one succeeds, final balance correct);
+  Campay outcome coverage for reissue (success/declined/transport-error); reconciler backoff and
+  no-ref grace-period behavior; terminal-status immutability.
+- `make lint` 0 issues; `make test` (`-race`, real Postgres via testcontainers, all packages)
+  green; `make test-cover` 88.8% total (business-logic packages) — down slightly from ~92%/89.2%
+  earlier baselines, expected given the reconciler package and new admin/platform endpoints added
+  alongside their tests.
+
+### Process notes
+- Implemented via Subagent-Driven Development (10-task plan, fresh implementer + task review per
+  task, in an isolated worktree), followed by a final whole-branch review and one bundled fix
+  wave for everything it found.
+- Merged (squash) into `main` via PR #3.
+
 ## 2026-07-29 — Epic 6: Multi-tenant foundation (backend) (Complete)
 
 ### What we did
