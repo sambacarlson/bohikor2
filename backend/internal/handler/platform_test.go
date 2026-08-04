@@ -30,6 +30,10 @@ type mockPlatformStore struct {
 	listErr          error
 	balanceErr       error
 	ledgerErr        error
+	needsReview      []db.ListRequestsNeedingReviewAcrossCompaniesRow
+	needsReviewErr   error
+	health           []db.ListCompanyRequestHealthRow
+	healthErr        error
 }
 
 func (m *mockPlatformStore) CreateCompanyWithSettings(ctx context.Context, arg db.CreateCompanyParams) (db.Company, error) {
@@ -96,6 +100,14 @@ func (m *mockPlatformStore) CreateLedgerEntry(ctx context.Context, arg db.Create
 
 func (m *mockPlatformStore) GetCompanyBalance(ctx context.Context, companyID uuid.UUID) (pgtype.Numeric, error) {
 	return m.balance, m.balanceErr
+}
+
+func (m *mockPlatformStore) ListRequestsNeedingReview(ctx context.Context) ([]db.ListRequestsNeedingReviewAcrossCompaniesRow, error) {
+	return m.needsReview, m.needsReviewErr
+}
+
+func (m *mockPlatformStore) ListCompanyRequestHealth(ctx context.Context) ([]db.ListCompanyRequestHealthRow, error) {
+	return m.health, m.healthErr
 }
 
 // stubHasher avoids bcrypt cost in unit tests.

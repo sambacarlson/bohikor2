@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -22,23 +24,26 @@ type InviteStore interface {
 
 type AdminQuerier interface {
 	GetAdminByID(ctx context.Context, id uuid.UUID) (db.Admin, error)
+	GetCompanyByID(ctx context.Context, id uuid.UUID) (db.Company, error)
 }
 
 type EmailSender interface {
-	SendInvitation(ctx context.Context, email string) error
+	SendInvitation(ctx context.Context, email, signupURL string) error
 }
 
 type InviteService struct {
-	store   InviteStore
-	email   EmailSender
-	querier AdminQuerier
+	store           InviteStore
+	email           EmailSender
+	querier         AdminQuerier
+	frontendBaseURL string
 }
 
-func NewInviteService(store InviteStore, email EmailSender, querier AdminQuerier) *InviteService {
+func NewInviteService(store InviteStore, email EmailSender, querier AdminQuerier, frontendBaseURL string) *InviteService {
 	return &InviteService{
-		store:   store,
-		email:   email,
-		querier: querier,
+		store:           store,
+		email:           email,
+		querier:         querier,
+		frontendBaseURL: frontendBaseURL,
 	}
 }
 
@@ -66,12 +71,21 @@ func (s *InviteService) Invite(ctx context.Context, email string, adminID string
 		}
 	}
 
+	// Company lookup happens only once the invite is known to actually
+	// proceed (past the duplicate-invitation check), since it's needed
+	// solely to build the signup URL below.
+	company, err := s.querier.GetCompanyByID(ctx, admin.CompanyID)
+	if err != nil {
+		return nil, fmt.Errorf("lookup company: %w", err)
+	}
+
 	invitation, err := s.store.CreateInvitation(ctx, email, admin.CompanyID, invitedBy)
 	if err != nil {
 		return nil, fmt.Errorf("create invitation: %w", err)
 	}
 
-	if err := s.email.SendInvitation(ctx, email); err != nil {
+	signupURL := fmt.Sprintf("%s/%s/signup?email=%s", strings.TrimRight(s.frontendBaseURL, "/"), company.Slug, url.QueryEscape(email))
+	if err := s.email.SendInvitation(ctx, email, signupURL); err != nil {
 		invID := pgtype.UUID{Bytes: invitation.ID, Valid: true}
 		_, _ = s.store.UpdateInvitationStatus(ctx, db.InvitationStatusFailed, invID)
 		return nil, fmt.Errorf("send invitation email: %w", err)

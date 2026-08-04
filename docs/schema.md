@@ -171,6 +171,7 @@ CREATE TABLE advance_requests (
 CREATE INDEX idx_advance_requests_company_id ON advance_requests (company_id);
 CREATE INDEX idx_advance_requests_user_id ON advance_requests (user_id);
 CREATE INDEX idx_advance_requests_status ON advance_requests (status);
+CREATE INDEX idx_advance_requests_needs_admin_review ON advance_requests (needs_admin_review) WHERE needs_admin_review = TRUE;
 ```
 
 - `id` doubles as the Campay `external_reference` (idempotency key).

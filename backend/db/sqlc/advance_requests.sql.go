@@ -318,6 +318,62 @@ func (q *Queries) ListAdvanceRequestsWithUserByCompany(ctx context.Context, arg 
 	return items, nil
 }
 
+const listCompanyRequestHealth = `-- name: ListCompanyRequestHealth :many
+SELECT
+    c.id AS company_id,
+    c.slug AS company_slug,
+    c.name AS company_name,
+    COUNT(*) FILTER (WHERE ar.status = 'processing') AS processing_count,
+    COUNT(*) FILTER (WHERE ar.status = 'pending') AS pending_count,
+    COUNT(*) FILTER (WHERE ar.needs_admin_review) AS needs_review_count
+FROM companies c
+LEFT JOIN advance_requests ar
+    ON ar.company_id = c.id
+    AND (ar.status IN ('processing', 'pending') OR ar.needs_admin_review)
+GROUP BY c.id, c.slug, c.name
+ORDER BY needs_review_count DESC, processing_count DESC, pending_count DESC
+`
+
+type ListCompanyRequestHealthRow struct {
+	CompanyID        uuid.UUID `json:"company_id"`
+	CompanySlug      string    `json:"company_slug"`
+	CompanyName      string    `json:"company_name"`
+	ProcessingCount  int64     `json:"processing_count"`
+	PendingCount     int64     `json:"pending_count"`
+	NeedsReviewCount int64     `json:"needs_review_count"`
+}
+
+// Per-company counts of in-flight/stuck payout states, for the platform
+// console's reconciliation health overview. The join is bounded to
+// non-terminal/flagged rows so cost scales with the in-flight queue size,
+// not each company's full lifetime request history.
+func (q *Queries) ListCompanyRequestHealth(ctx context.Context) ([]ListCompanyRequestHealthRow, error) {
+	rows, err := q.db.Query(ctx, listCompanyRequestHealth)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListCompanyRequestHealthRow
+	for rows.Next() {
+		var i ListCompanyRequestHealthRow
+		if err := rows.Scan(
+			&i.CompanyID,
+			&i.CompanySlug,
+			&i.CompanyName,
+			&i.ProcessingCount,
+			&i.PendingCount,
+			&i.NeedsReviewCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listReconcilableAdvanceRequests = `-- name: ListReconcilableAdvanceRequests :many
 SELECT id, company_id, user_id, amount_xaf, status, campay_payout_ref, failure_reason, payout_duration_seconds, attempt_count, last_reconciled_at, next_retry_at, needs_admin_review, reissued_from_id, created_at, updated_at FROM advance_requests
 WHERE needs_admin_review = FALSE
@@ -364,6 +420,85 @@ func (q *Queries) ListReconcilableAdvanceRequests(ctx context.Context) ([]Advanc
 			&i.ReissuedFromID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRequestsNeedingReviewAcrossCompanies = `-- name: ListRequestsNeedingReviewAcrossCompanies :many
+SELECT ar.id, ar.company_id, ar.user_id, ar.amount_xaf, ar.status, ar.campay_payout_ref, ar.failure_reason, ar.payout_duration_seconds, ar.attempt_count, ar.last_reconciled_at, ar.next_retry_at, ar.needs_admin_review, ar.reissued_from_id, ar.created_at, ar.updated_at, c.slug AS company_slug, c.name AS company_name, u.email AS user_email
+FROM advance_requests ar
+JOIN companies c ON c.id = ar.company_id
+JOIN users u ON u.id = ar.user_id
+WHERE ar.needs_admin_review = TRUE
+ORDER BY ar.updated_at DESC
+LIMIT 500
+`
+
+type ListRequestsNeedingReviewAcrossCompaniesRow struct {
+	ID                    uuid.UUID      `json:"id"`
+	CompanyID             uuid.UUID      `json:"company_id"`
+	UserID                uuid.UUID      `json:"user_id"`
+	AmountXaf             pgtype.Numeric `json:"amount_xaf"`
+	Status                RequestStatus  `json:"status"`
+	CampayPayoutRef       pgtype.Text    `json:"campay_payout_ref"`
+	FailureReason         pgtype.Text    `json:"failure_reason"`
+	PayoutDurationSeconds pgtype.Int4    `json:"payout_duration_seconds"`
+	AttemptCount          int32          `json:"attempt_count"`
+	LastReconciledAt      sql.NullTime   `json:"last_reconciled_at"`
+	NextRetryAt           sql.NullTime   `json:"next_retry_at"`
+	NeedsAdminReview      bool           `json:"needs_admin_review"`
+	ReissuedFromID        pgtype.UUID    `json:"reissued_from_id"`
+	CreatedAt             time.Time      `json:"created_at"`
+	UpdatedAt             time.Time      `json:"updated_at"`
+	CompanySlug           string         `json:"company_slug"`
+	CompanyName           string         `json:"company_name"`
+	UserEmail             string         `json:"user_email"`
+}
+
+// Platform-admin visibility into the needs_admin_review queue across every
+// company (the reconciler's escalation path today only surfaces per-company,
+// via /api/admin/requests, so there was no cross-tenant view of stuck
+// payouts before this query). Backed by the partial index
+// idx_advance_requests_needs_admin_review. This queue is expected to stay
+// near-empty in healthy operation (it only grows when the reconciler in
+// internal/reconciler/ has given up on a row after its full backoff ladder);
+// the LIMIT is a safety cap against unbounded growth during a sustained
+// Campay outage, not pagination for routine browsing.
+func (q *Queries) ListRequestsNeedingReviewAcrossCompanies(ctx context.Context) ([]ListRequestsNeedingReviewAcrossCompaniesRow, error) {
+	rows, err := q.db.Query(ctx, listRequestsNeedingReviewAcrossCompanies)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRequestsNeedingReviewAcrossCompaniesRow
+	for rows.Next() {
+		var i ListRequestsNeedingReviewAcrossCompaniesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.CompanyID,
+			&i.UserID,
+			&i.AmountXaf,
+			&i.Status,
+			&i.CampayPayoutRef,
+			&i.FailureReason,
+			&i.PayoutDurationSeconds,
+			&i.AttemptCount,
+			&i.LastReconciledAt,
+			&i.NextRetryAt,
+			&i.NeedsAdminReview,
+			&i.ReissuedFromID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.CompanySlug,
+			&i.CompanyName,
+			&i.UserEmail,
 		); err != nil {
 			return nil, err
 		}

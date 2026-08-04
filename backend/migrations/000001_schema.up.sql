@@ -146,6 +146,10 @@ CREATE TABLE advance_requests (
 CREATE INDEX idx_advance_requests_company_id ON advance_requests (company_id);
 CREATE INDEX idx_advance_requests_user_id ON advance_requests (user_id);
 CREATE INDEX idx_advance_requests_status ON advance_requests (status);
+-- Partial index: needs_admin_review is FALSE for the overwhelming majority of
+-- rows, so a full index would mostly waste space. Backs the platform
+-- console's cross-company needs-review queue (ListRequestsNeedingReviewAcrossCompanies).
+CREATE INDEX idx_advance_requests_needs_admin_review ON advance_requests (needs_admin_review) WHERE needs_admin_review = TRUE;
 
 -- ---------------------------------------------------------------------------
 -- Company ledger (immutable entries; balance = running SUM)

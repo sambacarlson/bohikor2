@@ -81,3 +81,40 @@ WHERE id = $1 RETURNING *;
 -- name: ResolveAdvanceRequest :one
 UPDATE advance_requests SET needs_admin_review = FALSE, updated_at = NOW()
 WHERE id = $1 AND needs_admin_review = TRUE RETURNING *;
+
+-- name: ListRequestsNeedingReviewAcrossCompanies :many
+-- Platform-admin visibility into the needs_admin_review queue across every
+-- company (the reconciler's escalation path today only surfaces per-company,
+-- via /api/admin/requests, so there was no cross-tenant view of stuck
+-- payouts before this query). Backed by the partial index
+-- idx_advance_requests_needs_admin_review. This queue is expected to stay
+-- near-empty in healthy operation (it only grows when the reconciler in
+-- internal/reconciler/ has given up on a row after its full backoff ladder);
+-- the LIMIT is a safety cap against unbounded growth during a sustained
+-- Campay outage, not pagination for routine browsing.
+SELECT ar.*, c.slug AS company_slug, c.name AS company_name, u.email AS user_email
+FROM advance_requests ar
+JOIN companies c ON c.id = ar.company_id
+JOIN users u ON u.id = ar.user_id
+WHERE ar.needs_admin_review = TRUE
+ORDER BY ar.updated_at DESC
+LIMIT 500;
+
+-- name: ListCompanyRequestHealth :many
+-- Per-company counts of in-flight/stuck payout states, for the platform
+-- console's reconciliation health overview. The join is bounded to
+-- non-terminal/flagged rows so cost scales with the in-flight queue size,
+-- not each company's full lifetime request history.
+SELECT
+    c.id AS company_id,
+    c.slug AS company_slug,
+    c.name AS company_name,
+    COUNT(*) FILTER (WHERE ar.status = 'processing') AS processing_count,
+    COUNT(*) FILTER (WHERE ar.status = 'pending') AS pending_count,
+    COUNT(*) FILTER (WHERE ar.needs_admin_review) AS needs_review_count
+FROM companies c
+LEFT JOIN advance_requests ar
+    ON ar.company_id = c.id
+    AND (ar.status IN ('processing', 'pending') OR ar.needs_admin_review)
+GROUP BY c.id, c.slug, c.name
+ORDER BY needs_review_count DESC, processing_count DESC, pending_count DESC;

@@ -25,19 +25,22 @@ func NewClient(apiKey, fromEmail string) *Client {
 	}
 }
 
-func (c *Client) SendInvitation(ctx context.Context, email string) error {
+func (c *Client) SendInvitation(ctx context.Context, email, signupURL string) error {
 	if email == "" {
 		return fmt.Errorf("email is required")
 	}
 	if !emailRegex.MatchString(email) {
 		return fmt.Errorf("invalid email format: %s", email)
 	}
+	if signupURL == "" {
+		return fmt.Errorf("signup URL is required")
+	}
 
 	params := &resend.SendEmailRequest{
 		From:    c.fromEmail,
 		To:      []string{email},
-		Subject: "You've been invited to Bohikor2 Admin",
-		Text:    "You have been invited to join the Bohikor2 Admin dashboard. Please sign up using your work email to get started.",
+		Subject: "You've been invited to Bohikor",
+		Text:    fmt.Sprintf("You have been invited to join Bohikor. Sign up using your work email to get started:\n\n%s", signupURL),
 	}
 
 	_, err := c.sdk.Emails.SendWithContext(ctx, params)

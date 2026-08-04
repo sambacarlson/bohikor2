@@ -28,6 +28,8 @@ type platformStore interface {
 	CreateAdmin(ctx context.Context, arg db.CreateAdminParams) (db.Admin, error)
 	CreateLedgerEntry(ctx context.Context, arg db.CreateLedgerEntryParams) (db.CompanyLedger, error)
 	GetCompanyBalance(ctx context.Context, companyID uuid.UUID) (pgtype.Numeric, error)
+	ListRequestsNeedingReview(ctx context.Context) ([]db.ListRequestsNeedingReviewAcrossCompaniesRow, error)
+	ListCompanyRequestHealth(ctx context.Context) ([]db.ListCompanyRequestHealthRow, error)
 }
 
 type PlatformHandler struct {
@@ -94,6 +96,14 @@ func (s *RealPlatformStore) CreateLedgerEntry(ctx context.Context, arg db.Create
 
 func (s *RealPlatformStore) GetCompanyBalance(ctx context.Context, companyID uuid.UUID) (pgtype.Numeric, error) {
 	return s.queries.GetCompanyBalance(ctx, companyID)
+}
+
+func (s *RealPlatformStore) ListRequestsNeedingReview(ctx context.Context) ([]db.ListRequestsNeedingReviewAcrossCompaniesRow, error) {
+	return s.queries.ListRequestsNeedingReviewAcrossCompanies(ctx)
+}
+
+func (s *RealPlatformStore) ListCompanyRequestHealth(ctx context.Context) ([]db.ListCompanyRequestHealthRow, error) {
+	return s.queries.ListCompanyRequestHealth(ctx)
 }
 
 // numericToString renders a pgtype.Numeric as a plain decimal string for JSON.
@@ -430,4 +440,30 @@ func isNonPositive(n pgtype.Numeric) bool {
 		return true
 	}
 	return n.Int == nil || n.Int.Sign() <= 0
+}
+
+// ListRequestsNeedingReview surfaces the needs_admin_review queue across
+// every company, so a platform admin isn't blind to stuck payouts that
+// today only surface per-company via /api/admin/requests. needs_admin_review
+// is set in exactly one place, internal/reconciler.bumpAttempt — if that
+// escalation logic (attempt threshold, grace period) changes, this queue's
+// meaning changes with it automatically since it reads the same column;
+// nothing here re-derives "stuck" independently.
+func (h *PlatformHandler) ListRequestsNeedingReview(c *gin.Context) {
+	respondList(c, "list requests needing review", "failed to list requests needing review",
+		func() ([]db.ListRequestsNeedingReviewAcrossCompaniesRow, error) {
+			return h.store.ListRequestsNeedingReview(c.Request.Context())
+		})
+}
+
+// RequestsHealth returns per-company counts of in-flight/stuck payout
+// states, for the platform console's reconciliation health overview. See
+// the needs_admin_review note on ListRequestsNeedingReview above; the
+// processing/pending counts here similarly just reflect
+// advance_requests.status as internal/reconciler leaves it.
+func (h *PlatformHandler) RequestsHealth(c *gin.Context) {
+	respondList(c, "list company request health", "failed to load request health",
+		func() ([]db.ListCompanyRequestHealthRow, error) {
+			return h.store.ListCompanyRequestHealth(c.Request.Context())
+		})
 }

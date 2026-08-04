@@ -65,16 +65,23 @@ func (m *mockStore) UpdateInvitationStatus(ctx context.Context, status db.Invita
 }
 
 type mockEmailSender struct {
-	sendErr error
+	sendErr   error
+	sentEmail string
+	sentURL   string
 }
 
-func (m *mockEmailSender) SendInvitation(ctx context.Context, email string) error {
+func (m *mockEmailSender) SendInvitation(ctx context.Context, email, signupURL string) error {
+	m.sentEmail = email
+	m.sentURL = signupURL
 	return m.sendErr
 }
 
 type mockAdminQuerier struct {
-	admin    *db.Admin
-	adminErr error
+	admin        *db.Admin
+	adminErr     error
+	company      *db.Company
+	companyErr   error
+	companyCalls int
 }
 
 func (m *mockAdminQuerier) GetAdminByID(ctx context.Context, id uuid.UUID) (db.Admin, error) {
@@ -85,6 +92,17 @@ func (m *mockAdminQuerier) GetAdminByID(ctx context.Context, id uuid.UUID) (db.A
 		return db.Admin{}, errTestNotFound
 	}
 	return *m.admin, nil
+}
+
+func (m *mockAdminQuerier) GetCompanyByID(ctx context.Context, id uuid.UUID) (db.Company, error) {
+	m.companyCalls++
+	if m.companyErr != nil {
+		return db.Company{}, m.companyErr
+	}
+	if m.company == nil {
+		return db.Company{ID: id, Slug: "acme"}, nil
+	}
+	return *m.company, nil
 }
 
 func TestInvite_HappyPath(t *testing.T) {
@@ -98,7 +116,7 @@ func TestInvite_HappyPath(t *testing.T) {
 			PasswordHash: "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy",
 		},
 	}
-	svc := NewInviteService(store, emailSender, adminQuerier)
+	svc := NewInviteService(store, emailSender, adminQuerier, "https://app.bohikor.com")
 
 	result, err := svc.Invite(context.Background(), "newadmin@example.com", adminID.String())
 	if err != nil {
@@ -116,6 +134,44 @@ func TestInvite_HappyPath(t *testing.T) {
 	if store.updatedStatus == nil || *store.updatedStatus != db.InvitationStatusSent {
 		t.Fatal("expected status to be updated to sent")
 	}
+	wantURL := "https://app.bohikor.com/acme/signup?email=newadmin%40example.com"
+	if emailSender.sentURL != wantURL {
+		t.Fatalf("expected signup URL %q, got %q", wantURL, emailSender.sentURL)
+	}
+}
+
+func TestInvite_SignupURLEmbedsCompanySlug(t *testing.T) {
+	store := &mockStore{}
+	emailSender := &mockEmailSender{}
+	adminID := uuid.New()
+	adminQuerier := &mockAdminQuerier{
+		admin:   &db.Admin{ID: adminID},
+		company: &db.Company{Slug: "globex-inc"},
+	}
+	svc := NewInviteService(store, emailSender, adminQuerier, "https://app.bohikor.com")
+
+	if _, err := svc.Invite(context.Background(), "new+hire@example.com", adminID.String()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	wantURL := "https://app.bohikor.com/globex-inc/signup?email=new%2Bhire%40example.com"
+	if emailSender.sentURL != wantURL {
+		t.Fatalf("expected signup URL %q, got %q", wantURL, emailSender.sentURL)
+	}
+}
+
+func TestInvite_CompanyLookupFails(t *testing.T) {
+	store := &mockStore{}
+	adminID := uuid.New()
+	adminQuerier := &mockAdminQuerier{
+		admin:      &db.Admin{ID: adminID},
+		companyErr: errTestNotFound,
+	}
+	svc := NewInviteService(store, &mockEmailSender{}, adminQuerier, "https://app.bohikor.com")
+
+	if _, err := svc.Invite(context.Background(), "a@b.com", adminID.String()); err == nil {
+		t.Fatal("expected error when company lookup fails")
+	}
 }
 
 func TestInvite_ActiveInvitationExists(t *testing.T) {
@@ -129,7 +185,7 @@ func TestInvite_ActiveInvitationExists(t *testing.T) {
 	adminQuerier := &mockAdminQuerier{
 		admin: &db.Admin{ID: adminID, PasswordHash: "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy"},
 	}
-	svc := NewInviteService(store, &mockEmailSender{}, adminQuerier)
+	svc := NewInviteService(store, &mockEmailSender{}, adminQuerier, "https://app.bohikor.com")
 
 	_, err := svc.Invite(context.Background(), "existing@example.com", adminID.String())
 	if err == nil {
@@ -137,6 +193,26 @@ func TestInvite_ActiveInvitationExists(t *testing.T) {
 	}
 	if !errors.Is(err, ErrActiveInvitationExists) {
 		t.Fatalf("expected ErrActiveInvitationExists, got %v", err)
+	}
+	if adminQuerier.companyCalls != 0 {
+		t.Fatalf("expected company lookup to be skipped on the duplicate-invitation rejection path, got %d calls", adminQuerier.companyCalls)
+	}
+}
+
+func TestInvite_SignupURLTrimsTrailingSlash(t *testing.T) {
+	store := &mockStore{}
+	emailSender := &mockEmailSender{}
+	adminID := uuid.New()
+	adminQuerier := &mockAdminQuerier{admin: &db.Admin{ID: adminID}}
+	svc := NewInviteService(store, emailSender, adminQuerier, "https://app.bohikor.com/")
+
+	if _, err := svc.Invite(context.Background(), "a@b.com", adminID.String()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	wantURL := "https://app.bohikor.com/acme/signup?email=a%40b.com"
+	if emailSender.sentURL != wantURL {
+		t.Fatalf("expected signup URL %q, got %q", wantURL, emailSender.sentURL)
 	}
 }
 
@@ -151,7 +227,7 @@ func TestInvite_AcceptedInvitationExists(t *testing.T) {
 	adminQuerier := &mockAdminQuerier{
 		admin: &db.Admin{ID: adminID, PasswordHash: "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy"},
 	}
-	svc := NewInviteService(store, &mockEmailSender{}, adminQuerier)
+	svc := NewInviteService(store, &mockEmailSender{}, adminQuerier, "https://app.bohikor.com")
 
 	_, err := svc.Invite(context.Background(), "accepted@example.com", adminID.String())
 	if err == nil {
@@ -174,7 +250,7 @@ func TestInvite_ReinviteAfterRevocation(t *testing.T) {
 	adminQuerier := &mockAdminQuerier{
 		admin: &db.Admin{ID: adminID, PasswordHash: "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy"},
 	}
-	svc := NewInviteService(store, emailSender, adminQuerier)
+	svc := NewInviteService(store, emailSender, adminQuerier, "https://app.bohikor.com")
 
 	result, err := svc.Invite(context.Background(), "expired@example.com", adminID.String())
 	if err != nil {
@@ -192,7 +268,7 @@ func TestInvite_EmailSendFails(t *testing.T) {
 	adminQuerier := &mockAdminQuerier{
 		admin: &db.Admin{ID: adminID, PasswordHash: "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy"},
 	}
-	svc := NewInviteService(store, emailSender, adminQuerier)
+	svc := NewInviteService(store, emailSender, adminQuerier, "https://app.bohikor.com")
 
 	_, err := svc.Invite(context.Background(), "fail@example.com", adminID.String())
 	if err == nil {
@@ -206,7 +282,7 @@ func TestInvite_EmailSendFails(t *testing.T) {
 func TestInvite_AdminNotFound(t *testing.T) {
 	store := &mockStore{}
 	adminQuerier := &mockAdminQuerier{adminErr: errTestNotFound}
-	svc := NewInviteService(store, &mockEmailSender{}, adminQuerier)
+	svc := NewInviteService(store, &mockEmailSender{}, adminQuerier, "https://app.bohikor.com")
 
 	_, err := svc.Invite(context.Background(), "newadmin@example.com", uuid.New().String())
 	if err == nil {
@@ -215,7 +291,7 @@ func TestInvite_AdminNotFound(t *testing.T) {
 }
 
 func TestInvite_InvalidAdminID(t *testing.T) {
-	svc := NewInviteService(&mockStore{}, &mockEmailSender{}, &mockAdminQuerier{})
+	svc := NewInviteService(&mockStore{}, &mockEmailSender{}, &mockAdminQuerier{}, "https://app.bohikor.com")
 	if _, err := svc.Invite(context.Background(), "a@b.com", "not-a-uuid"); err == nil {
 		t.Fatal("expected error for an unparseable admin id")
 	}
@@ -224,7 +300,7 @@ func TestInvite_InvalidAdminID(t *testing.T) {
 func TestInvite_CreateInvitationError(t *testing.T) {
 	adminID := uuid.New()
 	store := &mockStore{createErr: errTestNotFound}
-	svc := NewInviteService(store, &mockEmailSender{}, &mockAdminQuerier{admin: &db.Admin{ID: adminID}})
+	svc := NewInviteService(store, &mockEmailSender{}, &mockAdminQuerier{admin: &db.Admin{ID: adminID}}, "https://app.bohikor.com")
 	if _, err := svc.Invite(context.Background(), "a@b.com", adminID.String()); err == nil {
 		t.Fatal("expected error when CreateInvitation fails")
 	}
@@ -234,7 +310,7 @@ func TestInvite_UpdateToSentError(t *testing.T) {
 	adminID := uuid.New()
 	// Send succeeds, but the final status update to "sent" fails.
 	store := &mockStore{updateErr: errTestNotFound}
-	svc := NewInviteService(store, &mockEmailSender{}, &mockAdminQuerier{admin: &db.Admin{ID: adminID}})
+	svc := NewInviteService(store, &mockEmailSender{}, &mockAdminQuerier{admin: &db.Admin{ID: adminID}}, "https://app.bohikor.com")
 	if _, err := svc.Invite(context.Background(), "a@b.com", adminID.String()); err == nil {
 		t.Fatal("expected error when the final status update fails")
 	}

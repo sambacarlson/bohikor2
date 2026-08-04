@@ -70,7 +70,7 @@ func New(cfg *config.Config) (*Server, error) {
 	)
 
 	inviteStore := service.NewRealInviteStore(queries)
-	inviteService := service.NewInviteService(inviteStore, emailClient, queries)
+	inviteService := service.NewInviteService(inviteStore, emailClient, queries, cfg.FrontendBaseURL)
 
 	router := gin.New()
 	router.Use(gin.Recovery())
@@ -120,6 +120,7 @@ func New(cfg *config.Config) (*Server, error) {
 		adminGroup.GET("/users", handler.HandleListUsers(queries))
 		adminGroup.PUT("/users/:id/unlock", handler.HandleUnlockUser(queries))
 		adminGroup.GET("/events", handler.HandleListEvents(queries))
+		adminGroup.GET("/ledger", handler.HandleGetLedger(queries))
 	}
 
 	platformHandler := handler.NewPlatformHandler(handler.NewRealPlatformStore(queries, pool), hasher)
@@ -134,6 +135,8 @@ func New(cfg *config.Config) (*Server, error) {
 		platformGroup.POST("/companies/:id/admins", platformHandler.CreateCompanyAdmin)
 		platformGroup.POST("/companies/:id/ledger/topup", platformHandler.TopUpCompany)
 		platformGroup.POST("/companies/:id/ledger/adjustment", platformHandler.AdjustCompanyLedger)
+		platformGroup.GET("/requests/needs-review", platformHandler.ListRequestsNeedingReview)
+		platformGroup.GET("/requests/health", platformHandler.RequestsHealth)
 	}
 
 	userGroup := router.Group("/api/users")

@@ -1,5 +1,25 @@
 # Session Log
 
+## 2026-08-04 — Epic 8 backend gaps: company ledger view, platform request health, invite links (Complete)
+- Found while scoping the rest of Epic 8 (frontend): three read/plumbing gaps in the API surface
+  that the still-stubbed `bohikor/` screens will need. All additive, no schema changes.
+- **`GET /api/admin/ledger`** (`internal/handler/ledger.go`) — company admin's own balance +
+  paginated ledger history (`ListLedgerByCompany`/`GetCompanyBalance` already existed as sqlc
+  queries but were only wired to platform-admin routes). Always scoped to the caller's own
+  `company_id` from context, never a param.
+- **`GET /api/platform/requests/needs-review`** and **`GET /api/platform/requests/health`**
+  (`internal/handler/platform.go`) — the reconciler's `needs_admin_review` escalation path
+  (Epic 7) previously surfaced only per-company via `/api/admin/requests`; a platform admin had no
+  cross-tenant visibility into stuck payouts. New sqlc queries
+  `ListRequestsNeedingReviewAcrossCompanies` and `ListCompanyRequestHealth` (counts of
+  processing/pending/needs-review per company) back these; both are read-only.
+- **Invitation emails now carry a real link.** `internal/email/email.go SendInvitation` previously
+  sent plain text with no URL at all. Added `Config.FrontendBaseURL` (`FRONTEND_BASE_URL` env var,
+  defaults to `http://localhost:3000`), threaded the company's slug through
+  `InviteService.Invite` (new `AdminQuerier.GetCompanyByID` method) to build
+  `{FRONTEND_BASE_URL}/{company-slug}/signup?email={encoded}`, matching PLAN.md's Epic 8 task 6.
+- `go test -race ./...` and `golangci-lint run` both clean after the change.
+
 ## 2026-08-01 — Epic 8 task 1: rename admin/ → bohikor/ (Complete)
 - Mechanical rename only: `git mv admin bohikor`, `package.json` name updated to `bohikor`, `npm install && npm run build` verified unchanged, `admin/` references in `AGENTS.md`/`CLAUDE.md` updated — no route/component changes (later Epic 8 tasks).
 

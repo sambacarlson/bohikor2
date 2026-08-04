@@ -7,7 +7,7 @@ import (
 
 func TestSendInvitation_ValidEmail(t *testing.T) {
 	c := NewClient("test-key", "noreply@bohikor2.com")
-	err := c.SendInvitation(context.Background(), "admin@example.com")
+	err := c.SendInvitation(context.Background(), "admin@example.com", "https://app.bohikor.com/acme/signup?email=admin%40example.com")
 	if err == nil {
 		t.Skip("skipped: requires real Resend API key")
 	}
@@ -15,7 +15,7 @@ func TestSendInvitation_ValidEmail(t *testing.T) {
 
 func TestSendInvitation_EmptyEmail(t *testing.T) {
 	c := NewClient("test-key", "noreply@bohikor2.com")
-	err := c.SendInvitation(context.Background(), "")
+	err := c.SendInvitation(context.Background(), "", "https://app.bohikor.com/acme/signup")
 	if err == nil {
 		t.Fatal("expected error for empty email")
 	}
@@ -26,9 +26,20 @@ func TestSendInvitation_EmptyEmail(t *testing.T) {
 
 func TestSendInvitation_InvalidEmail(t *testing.T) {
 	c := NewClient("test-key", "noreply@bohikor2.com")
-	err := c.SendInvitation(context.Background(), "not-an-email")
+	err := c.SendInvitation(context.Background(), "not-an-email", "https://app.bohikor.com/acme/signup")
 	if err == nil {
 		t.Fatal("expected error for invalid email")
+	}
+}
+
+func TestSendInvitation_EmptySignupURL(t *testing.T) {
+	c := NewClient("test-key", "noreply@bohikor2.com")
+	err := c.SendInvitation(context.Background(), "admin@example.com", "")
+	if err == nil {
+		t.Fatal("expected error for empty signup URL")
+	}
+	if got := err.Error(); got != "signup URL is required" {
+		t.Fatalf("expected 'signup URL is required', got %s", got)
 	}
 }
 

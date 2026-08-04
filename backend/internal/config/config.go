@@ -28,6 +28,10 @@ type Config struct {
 	ResendAPIKey string `env:"RESEND_API_KEY" envDefault:""`
 	FromEmail    string `env:"FROM_EMAIL" envDefault:"onboarding@resend.dev"`
 
+	// Frontend (bohikor/) base URL, used to build links embedded in emails
+	// (e.g. the invitation email's /{company}/signup?email=... link).
+	FrontendBaseURL string `env:"FRONTEND_BASE_URL" envDefault:"http://localhost:3000"`
+
 	// Timezone
 	Timezone string `env:"TIMEZONE" envDefault:"Africa/Douala"`
 

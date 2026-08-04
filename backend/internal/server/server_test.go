@@ -289,7 +289,7 @@ type mockEmailSender struct {
 	sendErr error
 }
 
-func (m *mockEmailSender) SendInvitation(ctx context.Context, email string) error {
+func (m *mockEmailSender) SendInvitation(ctx context.Context, email, signupURL string) error {
 	return m.sendErr
 }
 
@@ -309,7 +309,7 @@ func TestInviteEndpoint_AdminInvites(t *testing.T) {
 		invitation: nil,
 	}
 	emailSender := &mockEmailSender{}
-	inviteSvc := service.NewInviteService(inviteStore, emailSender, adminQuerier)
+	inviteSvc := service.NewInviteService(inviteStore, emailSender, adminQuerier, "https://app.bohikor.com")
 
 	r := gin.New()
 	r.Use(middleware.JWTAuth(svc))
@@ -358,7 +358,7 @@ func TestInviteEndpoint_DuplicateInvitation(t *testing.T) {
 			Status: db.InvitationStatusSent,
 		},
 	}
-	inviteSvc := service.NewInviteService(inviteStore, &mockEmailSender{}, adminQuerier)
+	inviteSvc := service.NewInviteService(inviteStore, &mockEmailSender{}, adminQuerier, "https://app.bohikor.com")
 
 	r := gin.New()
 	r.Use(middleware.JWTAuth(svc))
