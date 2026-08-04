@@ -75,6 +75,7 @@ func companyActive(c *gin.Context, q Querier, companyID uuid.UUID) bool {
 		})
 		return false
 	}
+	c.Set("company_slug", company.Slug)
 	return true
 }
 
@@ -108,6 +109,7 @@ func RequireAdmin(q Querier) gin.HandlerFunc {
 		c.Set("admin_id", admin.ID.String())
 		c.Set("admin_email", admin.Email)
 		c.Set("company_id", admin.CompanyID)
+		c.Set("admin", admin)
 		c.Next()
 	}
 }

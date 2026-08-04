@@ -25,7 +25,7 @@ bohikor2/
 │   ├── db/sqlc/       # generated Go code (do not edit)
 │   ├── migrations/    # numbered .up.sql / .down.sql files
 │   └── go.mod
-├── admin/             # Next.js dashboard (invite + users + requests)
+├── bohikor/           # Next.js dashboard (invite + users + requests)
 │   └── src/
 └── mobile/            # Expo app (email + PIN login + signup + advance requests)
     ├── app/           # Expo Router routes
@@ -47,7 +47,7 @@ golangci-lint run              # lint
 ### Admin
 
 ```bash
-cd admin && npm install
+cd bohikor && npm install
 npm run dev       # dev server
 npm run lint      # ESLint
 npm run typecheck # tsc --noEmit

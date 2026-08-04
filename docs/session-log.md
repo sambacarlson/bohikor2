@@ -1,5 +1,8 @@
 # Session Log
 
+## 2026-08-01 — Epic 8 task 1: rename admin/ → bohikor/ (Complete)
+- Mechanical rename only: `git mv admin bohikor`, `package.json` name updated to `bohikor`, `npm install && npm run build` verified unchanged, `admin/` references in `AGENTS.md`/`CLAUDE.md` updated — no route/component changes (later Epic 8 tasks).
+
 ## 2026-08-01 — Epic 7: Payout reliability & float (backend) (Complete)
 
 ### What we did

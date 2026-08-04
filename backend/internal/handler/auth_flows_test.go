@@ -565,6 +565,18 @@ func TestAdminLogin_Success(t *testing.T) {
 	if strings.Contains(w.Body.String(), "hashed:secret") || strings.Contains(w.Body.String(), "password_hash") {
 		t.Fatalf("response leaks password hash: %s", w.Body.String())
 	}
+
+	var resp struct {
+		Data struct {
+			CompanySlug string `json:"company_slug"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+	if resp.Data.CompanySlug != "acme" {
+		t.Fatalf("expected company_slug acme, got %q", resp.Data.CompanySlug)
+	}
 }
 
 func TestAdminLogin_SuspendedCompanyBlocks(t *testing.T) {

@@ -14,10 +14,6 @@ type userQuerier interface {
 	GetUserByID(ctx context.Context, id uuid.UUID) (db.User, error)
 }
 
-type adminQuerier interface {
-	GetAdminByID(ctx context.Context, id uuid.UUID) (db.Admin, error)
-}
-
 func handleUserMe(q userQuerier) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		subjectIDStr := c.GetString("subject_id")
@@ -44,32 +40,21 @@ func handleUserMe(q userQuerier) gin.HandlerFunc {
 	}
 }
 
-func handleAdminMe(q adminQuerier) gin.HandlerFunc {
+// handleAdminMe reads the admin and company_slug that RequireAdmin (and its
+// shared companyActive check) already loaded for this request, rather than
+// re-querying rows the middleware just fetched.
+func handleAdminMe() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		subjectIDStr := c.GetString("subject_id")
-
-		subjectID, err := uuid.Parse(subjectIDStr)
-		if err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"error": "invalid subject id",
-			})
-			return
-		}
-
-		admin, err := q.GetAdminByID(c.Request.Context(), subjectID)
-		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{
-				"error": "admin not found",
-			})
-			return
-		}
+		admin := c.MustGet("admin").(db.Admin)
+		companySlug := c.GetString("company_slug")
 
 		c.JSON(http.StatusOK, gin.H{
 			"data": gin.H{
-				"id":         admin.ID,
-				"company_id": admin.CompanyID,
-				"email":      admin.Email,
-				"created_at": admin.CreatedAt,
+				"id":           admin.ID,
+				"company_id":   admin.CompanyID,
+				"company_slug": companySlug,
+				"email":        admin.Email,
+				"created_at":   admin.CreatedAt,
 			},
 		})
 	}

@@ -114,7 +114,7 @@ func New(cfg *config.Config) (*Server, error) {
 	adminGroup.Use(authMiddleware)
 	adminGroup.Use(middleware.RequireAdmin(queries))
 	{
-		adminGroup.GET("/me", handleAdminMe(queries))
+		adminGroup.GET("/me", handleAdminMe())
 		adminGroup.POST("/invite", handler.HandleInvite(inviteService))
 		adminGroup.GET("/invitations", handler.HandleListInvitations(queries))
 		adminGroup.GET("/users", handler.HandleListUsers(queries))

@@ -651,6 +651,7 @@ func (h *AuthHandler) AdminLogin(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"data": gin.H{
 			"admin":         sanitizeAdmin(admin),
+			"company_slug":  company.Slug,
 			"access_token":  tokens.AccessToken,
 			"refresh_token": tokens.RefreshToken,
 			"expires_in":    tokens.ExpiresIn,

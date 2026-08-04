@@ -53,7 +53,7 @@ func (q *testQuerier) GetUserByID(ctx context.Context, id uuid.UUID) (db.User, e
 }
 
 func (q *testQuerier) GetCompanyByID(ctx context.Context, id uuid.UUID) (db.Company, error) {
-	return db.Company{ID: id, Status: db.CompanyStatusActive}, nil
+	return db.Company{ID: id, Slug: "acme", Status: db.CompanyStatusActive}, nil
 }
 
 func (q *testQuerier) GetPlatformAdminByID(ctx context.Context, id uuid.UUID) (db.PlatformAdmin, error) {
@@ -97,7 +97,7 @@ func TestAdminMeEndpoint_NotAdmin(t *testing.T) {
 	r := gin.New()
 	r.Use(middleware.JWTAuth(svc))
 	r.Use(middleware.RequireAdmin(&testQuerier{}))
-	r.GET("/api/admin/me", handleAdminMe(&testQuerier{}))
+	r.GET("/api/admin/me", handleAdminMe())
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequestWithContext(context.Background(), "GET", "/api/admin/me", nil)
@@ -123,7 +123,7 @@ func TestAdminMeEndpoint_ActiveAdmin(t *testing.T) {
 	r := gin.New()
 	r.Use(middleware.JWTAuth(svc))
 	r.Use(middleware.RequireAdmin(q))
-	r.GET("/api/admin/me", handleAdminMe(q))
+	r.GET("/api/admin/me", handleAdminMe())
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequestWithContext(context.Background(), "GET", "/api/admin/me", nil)
@@ -147,6 +147,9 @@ func TestAdminMeEndpoint_ActiveAdmin(t *testing.T) {
 	}
 	if data["id"] != adminID.String() {
 		t.Fatalf("expected id %s, got %v", adminID.String(), data["id"])
+	}
+	if data["company_slug"] != "acme" {
+		t.Fatalf("expected company_slug acme, got %v", data["company_slug"])
 	}
 }
 

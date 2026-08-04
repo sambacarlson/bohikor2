@@ -14,9 +14,10 @@ merged to `main`. Concretely this means:
 
 - Every domain table now has `company_id`; a `companies` table and `platform_admins` (global
   super-admins) exist alongside the original `admins`/`users`.
-- `admin/` is still the pre-pivot Next.js dashboard — it has **not** yet been renamed/rebuilt into
-  the unified `bohikor/` app described in Epic 8. Don't assume routes like `/{company}/admin` exist
-  until that epic lands.
+- `admin/` has been renamed to `bohikor/` (Epic 8 task 1) — the directory move is done, but it is
+  still the pre-pivot Next.js dashboard underneath. The route restructuring, unified employee/
+  platform/admin screens, and de-shadcn work described in Epic 8 tasks 2–7 have not landed yet. Don't
+  assume routes like `/{company}/admin` exist until those tasks land.
 - `mobile/` is pre-pivot and will eventually be frozen (Epic 9), but is still the primary employee
   client for now.
 - The migration set is greenfield and rewritten in place — there is no production data to preserve,
@@ -57,7 +58,7 @@ sqlc is configured in `backend/db/sqlc.yaml`: schema comes from `../migrations`,
 checklist for why). `uuid`→`google/uuid.UUID`, `numeric`→`shopspring/decimal.Decimal`,
 `timestamptz`→`time.Time` (nullable → `sql.NullTime`).
 
-### Admin (`admin/`, Next.js 16) and Mobile (`mobile/`, Expo 54)
+### Bohikor (`bohikor/`, Next.js 16) and Mobile (`mobile/`, Expo 54)
 
 Both use `npm run {dev,lint,typecheck,test}`; mobile additionally has `android`/`ios`/`web`. See
 AGENTS.md for full build/run details — commands there are current.
@@ -127,8 +128,8 @@ request) creates a fresh row through the same eligibility+float+Campay flow; com
 
 ## Frontend architecture
 
-Both `admin/` and `mobile/` follow the same shape: `src/lib/api.ts` (axios instance with JWT
+Both `bohikor/` and `mobile/` follow the same shape: `src/lib/api.ts` (axios instance with JWT
 interceptor + refresh-token rotation), `src/lib/auth.ts` (token storage), `src/hooks/use-*.ts`
 (TanStack Query hooks, one file per resource, mirroring the backend handler-per-resource split), and
-a router-driven `app/` tree (Next.js App Router in `admin/`, Expo Router in `mobile/`) with route
+a router-driven `app/` tree (Next.js App Router in `bohikor/`, Expo Router in `mobile/`) with route
 groups for `(auth)` vs authenticated screens.
