@@ -5,17 +5,19 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useState,
   type ReactNode,
 } from "react";
 import { api } from "@/lib/api";
 import { getAccessToken, getSubjectHint, clearTokens } from "@/lib/auth";
-import type { Admin } from "@/types";
+import type { Admin, User } from "@/types";
 
-type SubjectType = "admin" | "platform_admin" | null;
+type SubjectType = "admin" | "platform_admin" | "user" | null;
 
 interface AuthContextType {
   admin: Admin | null;
+  user: User | null;
   subjectType: SubjectType;
   loading: boolean;
   signOut: () => Promise<void>;
@@ -24,6 +26,7 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType>({
   admin: null,
+  user: null,
   subjectType: null,
   loading: true,
   signOut: async () => {},
@@ -36,6 +39,7 @@ export function useAuth() {
 
 function useSubjectLoader() {
   const [admin, setAdmin] = useState<Admin | null>(null);
+  const [user, setUser] = useState<User | null>(null);
   const [subjectType, setSubjectType] = useState<SubjectType>(null);
   const [loading, setLoading] = useState(true);
 
@@ -45,6 +49,7 @@ function useSubjectLoader() {
 
     if (!token || !hint) {
       setAdmin(null);
+      setUser(null);
       setSubjectType(null);
       setLoading(false);
       return;
@@ -55,18 +60,28 @@ function useSubjectLoader() {
       // platform shell can render; real profile loading lands with the
       // platform-console task.
       setAdmin(null);
+      setUser(null);
       setSubjectType("platform_admin");
       setLoading(false);
       return;
     }
 
     try {
-      const { data } = await api.get<{ data: Admin }>("/api/admin/me");
-      setAdmin(data.data);
-      setSubjectType("admin");
+      if (hint === "user") {
+        const { data } = await api.get<{ data: User }>("/api/users/me");
+        setAdmin(null);
+        setUser(data.data);
+        setSubjectType("user");
+      } else {
+        const { data } = await api.get<{ data: Admin }>("/api/admin/me");
+        setAdmin(data.data);
+        setUser(null);
+        setSubjectType("admin");
+      }
     } catch {
       clearTokens();
       setAdmin(null);
+      setUser(null);
       setSubjectType(null);
     } finally {
       setLoading(false);
@@ -77,11 +92,11 @@ function useSubjectLoader() {
     void load(); // eslint-disable-line react-hooks/set-state-in-effect -- auth initialization must fetch and set state on mount
   }, [load]);
 
-  return { admin, subjectType, loading, load };
+  return { admin, user, subjectType, loading, load };
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const { admin, subjectType, loading, load: refreshSubject } = useSubjectLoader();
+  const { admin, user, subjectType, loading, load: refreshSubject } = useSubjectLoader();
 
   const signOut = useCallback(async () => {
     try {
@@ -92,9 +107,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     clearTokens();
   }, []);
 
-  return (
-    <AuthContext.Provider value={{ admin, subjectType, loading, signOut, refreshSubject }}>
-      {children}
-    </AuthContext.Provider>
+  const value = useMemo(
+    () => ({ admin, user, subjectType, loading, signOut, refreshSubject }),
+    [admin, user, subjectType, loading, signOut, refreshSubject]
   );
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

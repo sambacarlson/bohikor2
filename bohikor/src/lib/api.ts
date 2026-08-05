@@ -18,8 +18,10 @@ const api = axios.create({
 function reauthRedirectPath(): string {
   const { pathname } = window.location;
   if (pathname.startsWith("/platform")) return "/platform/login";
-  const [, company] = pathname.split("/");
-  return company ? `/${company}/admin/login` : "/";
+  const [, company, section] = pathname.split("/");
+  if (!company) return "/";
+  if (section === "admin") return `/${company}/admin/login`;
+  return `/${company}/login`;
 }
 
 let isRefreshing = false;

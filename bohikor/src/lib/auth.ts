@@ -4,7 +4,7 @@ const ACCESS_TOKEN_KEY = "bohikor2_access_token";
 const REFRESH_TOKEN_KEY = "bohikor2_refresh_token";
 const SUBJECT_HINT_KEY = "bohikor2_subject_hint";
 
-export type SubjectHint = "admin" | "platform_admin";
+export type SubjectHint = "admin" | "platform_admin" | "user";
 
 export function getAccessToken(): string | null {
   if (typeof window === "undefined") return null;

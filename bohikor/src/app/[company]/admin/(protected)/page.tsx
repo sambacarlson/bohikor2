@@ -47,7 +47,10 @@ export default function DashboardPage() {
   const totalRequests = requests?.length ?? 0;
   const successCount = requests?.filter((r) => r.status === "success").length ?? 0;
   const failedCount = requests?.filter((r) => r.status === "failed").length ?? 0;
-  const pendingCount = requests?.filter((r) => r.status === "initiated" || r.status === "pending").length ?? 0;
+  const pendingCount =
+    requests?.filter(
+      (r) => r.status === "initiated" || r.status === "processing" || r.status === "pending"
+    ).length ?? 0;
 
   return (
     <div>
