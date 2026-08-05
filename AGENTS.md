@@ -1,35 +1,36 @@
 # AGENTS.md — Bohikor2
 
-Salary advance pilot app. See `docs/brief.md` for business rules and `docs/schema.md` for the data contract.
+Multi-tenant salary-advance platform. See `docs/brief.md` for business rules and `docs/schema.md`
+for the data contract.
 
 ## Stack
 
 - **Backend:** Go 1.26, Gin, sqlc, pgx/v5, golang-migrate, Resend
-- **Admin:** Next.js 16, shadcn/ui, Tailwind v4, TanStack Query
-- **Mobile:** Expo SDK 54, React Native 0.81, NativeWind, TanStack Query, expo-secure-store
+- **Bohikor:** Next.js 16, Tailwind v4, TanStack Query
+- **Mobile:** Expo SDK 54, React Native 0.81, NativeWind, TanStack Query, expo-secure-store — **frozen**, see `mobile/README.md`
 - **Database:** PostgreSQL 18.4 (Neon/Supabase)
 - **Payments:** Campay Withdraw API (`POST /withdraw/`, sandbox: `https://demo.campay.net/api`)
-- **Testing:** Go `testing`, Jest + RTL (admin), Jest + RNTL (mobile)
+- **Testing:** Go `testing`, Jest + RTL (bohikor), Jest + RNTL (mobile)
 
 ## Repo Structure
 
 ```
 bohikor2/
-├── docs/              # brief.md, schema.md
+├── docs/              # brief.md, schema.md, session-log.md
 ├── PLAN.md
 ├── AGENTS.md
 ├── backend/           # Go API (Gin + sqlc + golang-migrate)
 │   ├── cmd/server/main.go
-│   ├── internal/      # handlers, services, middleware, config, campay
+│   ├── internal/      # handlers, services, middleware, config, campay, reconciler
 │   ├── db/queries/    # sqlc query definitions
 │   ├── db/sqlc/       # generated Go code (do not edit)
 │   ├── migrations/    # numbered .up.sql / .down.sql files
 │   └── go.mod
-├── bohikor/           # Next.js dashboard (invite + users + requests)
-│   └── src/
-└── mobile/            # Expo app (email + PIN login + signup + advance requests)
-    ├── app/           # Expo Router routes
-    └── src/           # hooks, providers, types, lib
+├── bohikor/           # Next.js multi-tenant web app — employee `/{company}`,
+│   └── src/           # company admin `/{company}/admin`, platform admin `/platform`
+└── mobile/            # Expo app — frozen (see mobile/README.md), no longer the
+    ├── app/           # primary employee client; kept green, no new features
+    └── src/
 ```
 
 ## Build & Run
@@ -44,7 +45,7 @@ go test ./...                  # tests
 golangci-lint run              # lint
 ```
 
-### Admin
+### Bohikor
 
 ```bash
 cd bohikor && npm install
@@ -68,9 +69,13 @@ Mobile requires a dev client build (`npx expo run:android/ios`). No Firebase nat
 
 ## Auth Flows (Epic 1 — Complete, Epic 2.5 — Complete, Epic 3 — PIN Auth Overhaul)
 
-### Admin Dashboard
+### Company Admin / Platform Admin
 1. Sign in with email/password → backend bcrypt verification → JWT tokens
-2. Dashboard: **Invite** (send invitation emails) and **Users** (list + refresh + unlock)
+   (`/{company}/admin/login` for a company admin, `/platform/login` for a platform admin)
+2. Company admin: users, invite, requests (+ reconcile/resolve/reissue), settings, balance/ledger,
+   events — all scoped to their own company
+3. Platform admin: companies (create + first admin + top-up balance + suspend/activate),
+   cross-company request health / needs-review queue
 
 ### Mobile — Login (Returning User)
 1. Enter email + 5-digit PIN → `POST /api/auth/login` → home
@@ -125,7 +130,8 @@ Mobile requires a dev client build (`npx expo run:android/ios`). No Firebase nat
 - `gofmt` formatting, `golangci-lint run` must pass
 - All `UPDATE` queries must set `updated_at = NOW()`
 - Use `slog` with structured fields, no string interpolation for errors
-- Migrations: numbered sequentially, no `IF NOT EXISTS`/`IF EXISTS`
+- Migrations: numbered sequentially, no `IF NOT EXISTS`/`IF EXISTS`. Never modify an existing
+  migration file — always add a new one (`make migrate-create NAME=...`) for schema changes.
 - Config via environment variables (`caarlos0/env`)
 
 ### TypeScript
@@ -138,7 +144,6 @@ Mobile requires a dev client build (`npx expo run:android/ios`). No Firebase nat
 - Schema source of truth: `docs/schema.md`
 - `snake_case` tables/columns, `idx_<table>_<desc>` for indexes
 - All timestamps `TIMESTAMPTZ`, IDs as UUIDs
-- Migrations run in CI pre-deploy, never on app boot
 
 ## Testing
 
@@ -154,6 +159,10 @@ Every PR must pass lint + typecheck + tests for the changed workspace(s).
 
 ## Deploy
 
+`backend/` deploys as a Docker container built from `backend/Dockerfile`. `bohikor/` is built
+directly from source by the deployment platform (no Dockerfile) — the checklist below applies to
+`backend/` only.
+
 ### Pre-push checklist
 
 Before pushing a backend change that touches Docker, build config, or migrations:
@@ -162,7 +171,7 @@ Before pushing a backend change that touches Docker, build config, or migrations
    ```bash
    docker build -f backend/Dockerfile -t bohikor2-test backend/
    ```
-   Catches missing files, bad paths, or broken builds before Render fails.
+   Catches missing files, bad paths, or broken builds before the deploy platform does.
 
 2. **Verify tracked files** — check that all needed files are tracked:
    ```bash

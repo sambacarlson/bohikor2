@@ -126,6 +126,10 @@ request) creates a fresh row through the same eligibility+float+Campay flow; com
 `needs_admin_review` flag with an audited note; or re-debit and re-disburse via Campay for a
 `failed` request, blocked from double-reissue by a DB unique constraint on `reissued_from_id`).
 
+## Git/PR workflow
+
+Never delete remote branches.
+
 ## Frontend architecture
 
 Both `bohikor/` and `mobile/` follow the same shape: `src/lib/api.ts` (axios instance with JWT
