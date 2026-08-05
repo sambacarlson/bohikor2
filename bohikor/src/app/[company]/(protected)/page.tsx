@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { useParams, useRouter } from "next/navigation";
 import { Check, LogOut, MoreVertical, RefreshCw, User, X } from "lucide-react";
 import { useAuth } from "@/components/providers";
@@ -88,7 +89,10 @@ export default function EmployeeHomePage() {
       <header className="border-b bg-background">
         <div className="mx-auto flex max-w-3xl items-center justify-between px-6 py-4">
           <div className="flex items-center gap-3">
-            <span className="text-xl font-bold">Bohikor</span>
+            <div className="flex items-center gap-2">
+              <Image src="/logo.png" alt="" width={24} height={24} />
+              <span className="text-xl font-bold">Bohikor</span>
+            </div>
             <span className="text-sm text-muted-foreground">{displayName}</span>
           </div>
           <DropdownMenu>

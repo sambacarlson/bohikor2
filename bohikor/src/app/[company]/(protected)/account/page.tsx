@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { LogOut, Phone } from "lucide-react";
 import { useAuth } from "@/components/providers";
@@ -162,7 +163,10 @@ export default function AccountPage() {
     <div className="min-h-screen bg-muted/50">
       <header className="border-b bg-background">
         <div className="mx-auto flex max-w-3xl items-center justify-between px-6 py-4">
-          <span className="text-xl font-bold">Bohikor</span>
+          <div className="flex items-center gap-2">
+            <Image src="/logo.png" alt="" width={24} height={24} />
+            <span className="text-xl font-bold">Bohikor</span>
+          </div>
           <Link href={`/${company}`} className="text-sm text-muted-foreground hover:underline">
             Back to home
           </Link>

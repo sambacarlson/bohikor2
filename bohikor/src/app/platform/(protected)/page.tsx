@@ -359,54 +359,56 @@ export default function PlatformConsolePage() {
       </div>
 
       {createOpen && (
-        <form
-          onSubmit={handleCreate}
-          className="mb-8 space-y-4 rounded-lg border bg-card p-5"
-        >
-          <h2 className="font-semibold">Create Company</h2>
+        <Card className="mb-8">
+          <CardHeader>
+            <CardTitle className="text-lg">Create Company</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleCreate} className="space-y-4">
+              {formError && (
+                <p className="text-sm text-destructive">{formError}</p>
+              )}
 
-          {formError && (
-            <p className="text-sm text-destructive">{formError}</p>
-          )}
+              <div className="space-y-2">
+                <Label htmlFor="company-name">Name</Label>
+                <Input
+                  id="company-name"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Acme Corp"
+                  required
+                />
+              </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="company-name">Name</Label>
-            <Input
-              id="company-name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Acme Corp"
-              required
-            />
-          </div>
+              <div className="space-y-2">
+                <Label htmlFor="company-slug">Slug</Label>
+                <Input
+                  id="company-slug"
+                  value={slug}
+                  onChange={(e) => setSlug(e.target.value)}
+                  placeholder="acme-corp"
+                  required
+                />
+                <p className="text-xs text-muted-foreground">
+                  lowercase letters, numbers, and hyphens only
+                </p>
+              </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="company-slug">Slug</Label>
-            <Input
-              id="company-slug"
-              value={slug}
-              onChange={(e) => setSlug(e.target.value)}
-              placeholder="acme-corp"
-              required
-            />
-            <p className="text-xs text-muted-foreground">
-              lowercase letters, numbers, and hyphens only
-            </p>
-          </div>
-
-          <div className="flex gap-2">
-            <Button type="submit" disabled={createCompany.isPending}>
-              {createCompany.isPending ? "Creating..." : "Create"}
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setCreateOpen(false)}
-            >
-              Cancel
-            </Button>
-          </div>
-        </form>
+              <div className="flex gap-2">
+                <Button type="submit" disabled={createCompany.isPending}>
+                  {createCompany.isPending ? "Creating..." : "Create"}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setCreateOpen(false)}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </form>
+          </CardContent>
+        </Card>
       )}
 
       {isLoading ? (
@@ -468,96 +470,104 @@ export default function PlatformConsolePage() {
         />
       )}
 
-      <section className="mt-8">
-        <h2 className="mb-4 text-xl font-bold">Reconciliation Health</h2>
-        <div className="rounded-md border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Company</TableHead>
-                <TableHead>Processing</TableHead>
-                <TableHead>Pending</TableHead>
-                <TableHead>Needs Review</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {!health || health.length === 0 ? (
+      <Card className="mt-8">
+        <CardHeader>
+          <CardTitle className="text-lg">Reconciliation Health</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="rounded-md border">
+            <Table>
+              <TableHeader>
                 <TableRow>
-                  <TableCell colSpan={4} className="text-center text-muted-foreground">
-                    All companies healthy — no requests need review.
-                  </TableCell>
+                  <TableHead>Company</TableHead>
+                  <TableHead>Processing</TableHead>
+                  <TableHead>Pending</TableHead>
+                  <TableHead>Needs Review</TableHead>
                 </TableRow>
-              ) : (
-                health.map((row) => (
-                  <TableRow key={row.company_id}>
-                    <TableCell className="font-medium">
-                      {row.company_name} ({row.company_slug})
-                    </TableCell>
-                    <TableCell>{row.processing_count}</TableCell>
-                    <TableCell>{row.pending_count}</TableCell>
-                    <TableCell>
-                      <Badge variant={row.needs_review_count > 0 ? "destructive" : "secondary"}>
-                        {row.needs_review_count}
-                      </Badge>
+              </TableHeader>
+              <TableBody>
+                {!health || health.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={4} className="text-center text-muted-foreground">
+                      All companies healthy — no requests need review.
                     </TableCell>
                   </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </div>
-      </section>
+                ) : (
+                  health.map((row) => (
+                    <TableRow key={row.company_id}>
+                      <TableCell className="font-medium">
+                        {row.company_name} ({row.company_slug})
+                      </TableCell>
+                      <TableCell>{row.processing_count}</TableCell>
+                      <TableCell>{row.pending_count}</TableCell>
+                      <TableCell>
+                        <Badge variant={row.needs_review_count > 0 ? "destructive" : "secondary"}>
+                          {row.needs_review_count}
+                        </Badge>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </CardContent>
+      </Card>
 
-      <section className="mt-8">
-        <h2 className="mb-4 text-xl font-bold">Needs Review</h2>
-        <div className="rounded-md border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Company</TableHead>
-                <TableHead>User Email</TableHead>
-                <TableHead>Amount</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Created</TableHead>
-                <TableHead></TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {!needsReview || needsReview.length === 0 ? (
+      <Card className="mt-8">
+        <CardHeader>
+          <CardTitle className="text-lg">Needs Review</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="rounded-md border">
+            <Table>
+              <TableHeader>
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center text-muted-foreground">
-                    Nothing flagged for review.
-                  </TableCell>
+                  <TableHead>Company</TableHead>
+                  <TableHead>User Email</TableHead>
+                  <TableHead>Amount</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Created</TableHead>
+                  <TableHead></TableHead>
                 </TableRow>
-              ) : (
-                needsReview.map((request) => (
-                  <TableRow key={request.id}>
-                    <TableCell className="font-medium">
-                      {request.company_name} ({request.company_slug})
-                    </TableCell>
-                    <TableCell>{request.user_email || request.user_id}</TableCell>
-                    <TableCell>{request.amount_xaf} XAF</TableCell>
-                    <TableCell>
-                      <Badge variant="destructive">{request.status}</Badge>
-                    </TableCell>
-                    <TableCell>
-                      {new Date(request.created_at).toLocaleDateString()}
-                    </TableCell>
-                    <TableCell>
-                      <Link
-                        href={`/${request.company_slug}/admin/requests`}
-                        className="text-sm text-primary underline-offset-4 hover:underline"
-                      >
-                        Open company requests
-                      </Link>
+              </TableHeader>
+              <TableBody>
+                {!needsReview || needsReview.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={6} className="text-center text-muted-foreground">
+                      Nothing flagged for review.
                     </TableCell>
                   </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </div>
-      </section>
+                ) : (
+                  needsReview.map((request) => (
+                    <TableRow key={request.id}>
+                      <TableCell className="font-medium">
+                        {request.company_name} ({request.company_slug})
+                      </TableCell>
+                      <TableCell>{request.user_email || request.user_id}</TableCell>
+                      <TableCell>{request.amount_xaf} XAF</TableCell>
+                      <TableCell>
+                        <Badge variant="destructive">{request.status}</Badge>
+                      </TableCell>
+                      <TableCell>
+                        {new Date(request.created_at).toLocaleDateString()}
+                      </TableCell>
+                      <TableCell>
+                        <Link
+                          href={`/${request.company_slug}/admin/requests`}
+                          className="text-sm text-primary underline-offset-4 hover:underline"
+                        >
+                          Open company requests
+                        </Link>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }

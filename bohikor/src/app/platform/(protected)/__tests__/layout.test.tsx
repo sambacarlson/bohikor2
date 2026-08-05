@@ -3,6 +3,7 @@ import PlatformLayout from "../layout";
 
 jest.mock("next/navigation", () => ({
   useRouter: () => ({ push: jest.fn(), back: jest.fn() }),
+  usePathname: () => "/platform",
 }));
 
 jest.mock("@/components/auth-guard", () => ({
