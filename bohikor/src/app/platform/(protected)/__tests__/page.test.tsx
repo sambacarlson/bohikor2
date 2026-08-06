@@ -157,6 +157,14 @@ describe("PlatformConsolePage", () => {
     expect(await screen.findByText("That slug is already taken.")).toBeInTheDocument();
   });
 
+  it("gives the Create Company dialog an accessible dialog role", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<PlatformConsolePage />);
+
+    await user.click(screen.getByRole("button", { name: /create company/i }));
+    expect(screen.getByRole("dialog")).toHaveAccessibleName("Create Company");
+  });
+
   it("refetches when the refresh button is clicked", async () => {
     const user = userEvent.setup();
     const refetchFn = jest.fn();
@@ -200,6 +208,12 @@ describe("PlatformConsolePage", () => {
       expect(screen.getAllByText("active").length).toBeGreaterThan(0);
     });
 
+    it("gives the loaded Manage modal an accessible dialog role", async () => {
+      const user = userEvent.setup();
+      await openDetail(user);
+      expect(screen.getByRole("dialog")).toHaveAccessibleName("Acme Corp");
+    });
+
     it("gives the modal an accessible title even while company data is still loading", async () => {
       useCompany.mockReturnValue({ data: undefined, isLoading: true });
       const user = userEvent.setup();
@@ -224,6 +238,29 @@ describe("PlatformConsolePage", () => {
 
       await user.click(screen.getByRole("button", { name: /confirm suspend/i }));
       expect(updateFn).toHaveBeenCalledWith({ id: "company-1", status: "suspended" });
+    });
+
+    it("re-arms the two-step suspend confirmation on reopen instead of carrying it over", async () => {
+      const user = userEvent.setup();
+      const updateFn = jest.fn().mockResolvedValue({});
+      useUpdateCompanyStatus.mockReturnValue({ mutateAsync: updateFn, isPending: false });
+
+      await openDetail(user);
+      await user.click(screen.getByRole("button", { name: /^suspend$/i }));
+      expect(screen.getByRole("button", { name: /confirm suspend/i })).toBeInTheDocument();
+
+      // Close without confirming, then reopen the *same* company.
+      await user.click(screen.getByRole("button", { name: "Close" }));
+      await user.click(screen.getByRole("button", { name: /manage/i }));
+      await screen.findByRole("heading", { name: /top up/i });
+
+      // The armed "Confirm Suspend?" must not have survived the close/reopen —
+      // otherwise a single click here would suspend the company immediately.
+      expect(screen.getByRole("button", { name: /^suspend$/i })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /confirm suspend/i })).not.toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: /^suspend$/i }));
+      expect(updateFn).not.toHaveBeenCalled();
     });
 
     it("activates a suspended company with one click", async () => {
@@ -333,6 +370,37 @@ describe("PlatformConsolePage", () => {
       expect(
         await screen.findByText("That email already has an admin account.")
       ).toBeInTheDocument();
+    });
+
+    it("resets draft form state when Manage is reopened for a different company", async () => {
+      const mockCompany2 = { ...mockCompany, id: "company-2", slug: "globex", name: "Globex" };
+      useCompanies.mockReturnValue({
+        data: [mockCompany, mockCompany2],
+        isLoading: false,
+        refetch: jest.fn(),
+        isRefetching: false,
+      });
+      useCompany.mockImplementation((id: string) => ({
+        data: id === "company-2" ? mockCompany2 : mockCompany,
+        isLoading: false,
+      }));
+
+      const user = userEvent.setup();
+      renderWithProviders(<PlatformConsolePage />);
+
+      const manageButtons = screen.getAllByRole("button", { name: /manage/i });
+      await user.click(manageButtons[0]);
+      await screen.findByRole("heading", { name: /top up/i });
+
+      const topUpInput = screen.getAllByLabelText("Amount (XAF)")[0];
+      await user.type(topUpInput, "12345");
+      expect(topUpInput).toHaveValue("12345");
+
+      await user.click(screen.getByRole("button", { name: "Close" }));
+      await user.click(manageButtons[1]);
+
+      expect(await screen.findByRole("heading", { name: "Globex" })).toBeInTheDocument();
+      expect(screen.getAllByLabelText("Amount (XAF)")[0]).toHaveValue("");
     });
   });
 

@@ -44,11 +44,11 @@ function CompanyDetail({
   open,
   onOpenChange,
 }: {
-  companyId: string;
+  companyId: string | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const { data: company, isLoading } = useCompany(companyId);
+  const { data: company, isLoading } = useCompany(companyId ?? "", !!companyId);
   const updateStatus = useUpdateCompanyStatus();
   const topUp = useTopUpCompany();
   const adjust = useAdjustCompanyLedger();
@@ -65,6 +65,32 @@ function CompanyDetail({
   const [adminPassword, setAdminPassword] = useState("");
   const [adminError, setAdminError] = useState("");
   const [adminCreated, setAdminCreated] = useState("");
+
+  // The dialog now stays mounted across open/close so Radix can play the close
+  // animation, instead of the parent unmounting this component synchronously, so
+  // this is no longer freshly mounted on every open. Reset the ephemeral form state
+  // ourselves on every closed->open transition (not just when the company changes —
+  // reopening the *same* company must also start clean, e.g. an armed "Confirm
+  // Suspend?" from a prior visit must not survive close/reopen and fire on a single
+  // click), following React's "adjust state during render" pattern rather than an
+  // effect (avoids an extra commit/paint, so there's no visible flash to defaults).
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) {
+      setConfirmSuspend(false);
+      setTopUpAmount("");
+      setTopUpNote("");
+      setTopUpError("");
+      setAdjustAmount("");
+      setAdjustNote("");
+      setAdjustError("");
+      setAdminEmail("");
+      setAdminPassword("");
+      setAdminError("");
+      setAdminCreated("");
+    }
+  }
 
   const handleToggleStatus = async () => {
     if (!company) return;
@@ -158,11 +184,14 @@ function CompanyDetail({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="max-w-2xl">
         {isLoading || !company ? (
           <>
             <DialogHeader>
               <DialogTitle className="sr-only">Loading company</DialogTitle>
+              <DialogDescription className="sr-only">
+                Fetching company details
+              </DialogDescription>
             </DialogHeader>
             <p className="text-muted-foreground">Loading company...</p>
           </>
@@ -325,7 +354,11 @@ export default function PlatformConsolePage() {
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
   const [formError, setFormError] = useState("");
+  // selectedCompanyId is kept (not nulled) across close so the exit animation shows
+  // the right company's content instead of flashing to the loading state; detailOpen
+  // alone controls visibility.
   const [selectedCompanyId, setSelectedCompanyId] = useState<string | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -381,6 +414,9 @@ export default function PlatformConsolePage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Create Company</DialogTitle>
+            <DialogDescription className="sr-only">
+              Register a new company on the platform
+            </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleCreate} className="space-y-4">
             {formError && (
@@ -447,10 +483,7 @@ export default function PlatformConsolePage() {
             </TableHeader>
             <TableBody>
               {companies.map((company) => (
-                <TableRow
-                  key={company.id}
-                  className={selectedCompanyId === company.id ? "bg-muted/50" : undefined}
-                >
+                <TableRow key={company.id}>
                   <TableCell className="font-medium">{company.name}</TableCell>
                   <TableCell className="font-mono text-xs">{company.slug}</TableCell>
                   <TableCell>
@@ -468,7 +501,10 @@ export default function PlatformConsolePage() {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => setSelectedCompanyId(company.id)}
+                      onClick={() => {
+                        setSelectedCompanyId(company.id);
+                        setDetailOpen(true);
+                      }}
                     >
                       Manage
                     </Button>
@@ -480,15 +516,11 @@ export default function PlatformConsolePage() {
         </div>
       )}
 
-      {selectedCompanyId && (
-        <CompanyDetail
-          companyId={selectedCompanyId}
-          open={!!selectedCompanyId}
-          onOpenChange={(open) => {
-            if (!open) setSelectedCompanyId(null);
-          }}
-        />
-      )}
+      <CompanyDetail
+        companyId={selectedCompanyId}
+        open={detailOpen}
+        onOpenChange={setDetailOpen}
+      />
 
       <Card className="mt-8">
         <CardHeader>
