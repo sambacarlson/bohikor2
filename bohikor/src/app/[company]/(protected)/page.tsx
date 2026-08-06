@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useParams, useRouter } from "next/navigation";
-import { Check, LogOut, MoreVertical, RefreshCw, User, X } from "lucide-react";
+import { Check, LogOut, MoreVertical, RefreshCw, User } from "lucide-react";
 import { useAuth } from "@/components/providers";
 import { useEligibility } from "@/hooks/use-eligibility";
 import { useCreateAdvanceRequest } from "@/hooks/use-advance-requests";
@@ -23,6 +23,14 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { extractApiError } from "@/lib/errors";
 
 export default function EmployeeHomePage() {
@@ -303,53 +311,36 @@ export default function EmployeeHomePage() {
         </Link>
       </main>
 
-      {modalVisible && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-6"
-          onClick={() => setModalVisible(false)}
-        >
-          <div
-            className="w-full max-w-sm rounded-xl bg-white p-6"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="mb-2 flex items-center justify-between">
-              <h2 className="text-xl font-bold">Confirm Advance Request</h2>
-              <button
-                onClick={() => setModalVisible(false)}
-                aria-label="Close"
-                className="text-muted-foreground hover:text-foreground"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
+      <Dialog open={modalVisible} onOpenChange={setModalVisible}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Confirm Advance Request</DialogTitle>
+          </DialogHeader>
 
-            <p className="mb-4 text-sm text-muted-foreground">
-              You are about to request a salary advance of{" "}
-              <span className="font-semibold text-foreground">{advanceAmount}</span>.
-              This amount plus any applicable charges will be deducted from your
-              upcoming salary payment. You can only have one active advance request
-              at a time.
-            </p>
+          <DialogDescription>
+            You are about to request a salary advance of{" "}
+            <span className="font-semibold text-foreground">{advanceAmount}</span>.
+            This amount plus any applicable charges will be deducted from your
+            upcoming salary payment. You can only have one active advance request
+            at a time.
+          </DialogDescription>
 
-            {modalError && (
-              <p className="mb-4 text-sm text-destructive">{modalError}</p>
-            )}
+          {modalError && <p className="mt-3 text-sm text-destructive">{modalError}</p>}
 
-            <div className="flex justify-end gap-3">
-              <Button
-                variant="outline"
-                onClick={() => setModalVisible(false)}
-                disabled={createRequest.isPending}
-              >
-                Cancel
-              </Button>
-              <Button onClick={handleConfirmRequest} disabled={createRequest.isPending}>
-                {createRequest.isPending ? "Requesting..." : "Confirm"}
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setModalVisible(false)}
+              disabled={createRequest.isPending}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleConfirmRequest} disabled={createRequest.isPending}>
+              {createRequest.isPending ? "Requesting..." : "Confirm"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -10,7 +10,7 @@ function Card({
     <div
       data-slot="card"
       className={cn(
-        "flex flex-col gap-4 rounded-xl bg-card text-sm text-card-foreground ring-1 ring-foreground/10",
+        "flex flex-col gap-4 rounded-2xl bg-card text-sm text-card-foreground ring-1 ring-foreground/10",
         size === "sm" ? "gap-3 py-3" : "py-4",
         className
       )}

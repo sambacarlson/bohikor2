@@ -200,6 +200,17 @@ describe("PlatformConsolePage", () => {
       expect(screen.getAllByText("active").length).toBeGreaterThan(0);
     });
 
+    it("gives the modal an accessible title even while company data is still loading", async () => {
+      useCompany.mockReturnValue({ data: undefined, isLoading: true });
+      const user = userEvent.setup();
+
+      renderWithProviders(<PlatformConsolePage />);
+      await user.click(screen.getByRole("button", { name: /manage/i }));
+
+      expect(await screen.findByText("Loading company...")).toBeInTheDocument();
+      expect(screen.getByRole("dialog")).toHaveAccessibleName("Loading company");
+    });
+
     it("requires two clicks to suspend a company", async () => {
       const user = userEvent.setup();
       const updateFn = jest.fn().mockResolvedValue({});

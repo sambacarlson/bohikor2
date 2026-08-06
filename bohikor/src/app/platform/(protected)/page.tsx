@@ -24,7 +24,15 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { RefreshCw, X } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { extractApiErrorCode } from "@/lib/errors";
 import { toast } from "sonner";
@@ -33,10 +41,12 @@ const slugPattern = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
 function CompanyDetail({
   companyId,
-  onClose,
+  open,
+  onOpenChange,
 }: {
   companyId: string;
-  onClose: () => void;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 }) {
   const { data: company, isLoading } = useCompany(companyId);
   const updateStatus = useUpdateCompanyStatus();
@@ -146,153 +156,162 @@ function CompanyDetail({
     }
   };
 
-  if (isLoading || !company) {
-    return <p className="text-muted-foreground">Loading company...</p>;
-  }
-
   return (
-    <Card className="mt-8">
-      <CardHeader className="flex flex-row items-center justify-between space-y-0">
-        <CardTitle className="text-lg">{company.name}</CardTitle>
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-muted-foreground">{company.slug}</span>
-          <Badge variant={company.status === "active" ? "default" : "destructive"}>
-            {company.status}
-          </Badge>
-          <Button variant="ghost" size="icon" onClick={onClose} aria-label="Close detail">
-            <X className="h-4 w-4" />
-          </Button>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-6">
-        <div>
-          <p className="text-sm text-muted-foreground">Balance</p>
-          <p className="text-3xl font-bold">{company.balance_xaf} XAF</p>
-        </div>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        {isLoading || !company ? (
+          <>
+            <DialogHeader>
+              <DialogTitle className="sr-only">Loading company</DialogTitle>
+            </DialogHeader>
+            <p className="text-muted-foreground">Loading company...</p>
+          </>
+        ) : (
+          <>
+            <DialogHeader>
+              <DialogTitle>{company.name}</DialogTitle>
+              <DialogDescription className="sr-only">
+                Manage company details, balance, and admin access
+              </DialogDescription>
+            </DialogHeader>
+            <div className="mb-2 flex items-center gap-2">
+              <span className="font-mono text-sm text-muted-foreground">{company.slug}</span>
+              <Badge variant={company.status === "active" ? "default" : "destructive"}>
+                {company.status}
+              </Badge>
+            </div>
+            <div className="space-y-6">
+              <div>
+                <p className="text-sm text-muted-foreground">Balance</p>
+                <p className="text-3xl font-bold">{company.balance_xaf} XAF</p>
+              </div>
 
-        <div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleToggleStatus}
-            disabled={updateStatus.isPending}
-          >
-            {updateStatus.isPending
-              ? "Updating..."
-              : company.status === "active"
-                ? confirmSuspend
-                  ? "Confirm Suspend?"
-                  : "Suspend"
-                : "Activate"}
-          </Button>
-          {confirmSuspend && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setConfirmSuspend(false)}
-            >
-              Cancel
-            </Button>
-          )}
-        </div>
+              <div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleToggleStatus}
+                  disabled={updateStatus.isPending}
+                >
+                  {updateStatus.isPending
+                    ? "Updating..."
+                    : company.status === "active"
+                      ? confirmSuspend
+                        ? "Confirm Suspend?"
+                        : "Suspend"
+                      : "Activate"}
+                </Button>
+                {confirmSuspend && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setConfirmSuspend(false)}
+                  >
+                    Cancel
+                  </Button>
+                )}
+              </div>
 
-        <form onSubmit={handleTopUp} className="space-y-4 border-t pt-4">
-          <h3 className="font-semibold">Top Up</h3>
-          {topUpError && <p className="text-sm text-destructive">{topUpError}</p>}
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="topup-amount">Amount (XAF)</Label>
-              <Input
-                id="topup-amount"
-                inputMode="numeric"
-                value={topUpAmount}
-                onChange={(e) => setTopUpAmount(e.target.value.replace(/[^\d]/g, ""))}
-                placeholder="50000"
-                required
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="topup-note">Note (optional)</Label>
-              <Input
-                id="topup-note"
-                value={topUpNote}
-                onChange={(e) => setTopUpNote(e.target.value)}
-                placeholder="Initial funding"
-              />
-            </div>
-          </div>
-          <Button type="submit" size="sm" disabled={topUp.isPending}>
-            {topUp.isPending ? "Topping up..." : "Top Up"}
-          </Button>
-        </form>
+              <form onSubmit={handleTopUp} className="space-y-4 border-t pt-4">
+                <h3 className="font-semibold">Top Up</h3>
+                {topUpError && <p className="text-sm text-destructive">{topUpError}</p>}
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="topup-amount">Amount (XAF)</Label>
+                    <Input
+                      id="topup-amount"
+                      inputMode="numeric"
+                      value={topUpAmount}
+                      onChange={(e) => setTopUpAmount(e.target.value.replace(/[^\d]/g, ""))}
+                      placeholder="50000"
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="topup-note">Note (optional)</Label>
+                    <Input
+                      id="topup-note"
+                      value={topUpNote}
+                      onChange={(e) => setTopUpNote(e.target.value)}
+                      placeholder="Initial funding"
+                    />
+                  </div>
+                </div>
+                <Button type="submit" size="sm" disabled={topUp.isPending}>
+                  {topUp.isPending ? "Topping up..." : "Top Up"}
+                </Button>
+              </form>
 
-        <form onSubmit={handleAdjust} className="space-y-4 border-t pt-4">
-          <div>
-            <h3 className="font-semibold">Manual Adjustment (corrections only)</h3>
-            <p className="text-xs text-muted-foreground">
-              Use a negative amount to deduct. A note is required.
-            </p>
-          </div>
-          {adjustError && <p className="text-sm text-destructive">{adjustError}</p>}
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="adjust-amount">Amount (XAF)</Label>
-              <Input
-                id="adjust-amount"
-                inputMode="text"
-                value={adjustAmount}
-                onChange={(e) => setAdjustAmount(e.target.value)}
-                placeholder="-5000"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="adjust-note">Note (required)</Label>
-              <Input
-                id="adjust-note"
-                value={adjustNote}
-                onChange={(e) => setAdjustNote(e.target.value)}
-                placeholder="Correction reason"
-              />
-            </div>
-          </div>
-          <Button type="submit" size="sm" disabled={adjust.isPending}>
-            {adjust.isPending ? "Adjusting..." : "Apply Adjustment"}
-          </Button>
-        </form>
+              <form onSubmit={handleAdjust} className="space-y-4 border-t pt-4">
+                <div>
+                  <h3 className="font-semibold">Manual Adjustment (corrections only)</h3>
+                  <p className="text-xs text-muted-foreground">
+                    Use a negative amount to deduct. A note is required.
+                  </p>
+                </div>
+                {adjustError && <p className="text-sm text-destructive">{adjustError}</p>}
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="adjust-amount">Amount (XAF)</Label>
+                    <Input
+                      id="adjust-amount"
+                      inputMode="text"
+                      value={adjustAmount}
+                      onChange={(e) => setAdjustAmount(e.target.value)}
+                      placeholder="-5000"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="adjust-note">Note (required)</Label>
+                    <Input
+                      id="adjust-note"
+                      value={adjustNote}
+                      onChange={(e) => setAdjustNote(e.target.value)}
+                      placeholder="Correction reason"
+                    />
+                  </div>
+                </div>
+                <Button type="submit" size="sm" disabled={adjust.isPending}>
+                  {adjust.isPending ? "Adjusting..." : "Apply Adjustment"}
+                </Button>
+              </form>
 
-        <form onSubmit={handleCreateAdmin} className="space-y-4 border-t pt-4">
-          <h3 className="font-semibold">Create Admin</h3>
-          {adminError && <p className="text-sm text-destructive">{adminError}</p>}
-          {adminCreated && <p className="text-sm text-green-600">{adminCreated}</p>}
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="admin-email">Email</Label>
-              <Input
-                id="admin-email"
-                type="email"
-                value={adminEmail}
-                onChange={(e) => setAdminEmail(e.target.value)}
-                placeholder="admin@acme.com"
-                required
-              />
+              <form onSubmit={handleCreateAdmin} className="space-y-4 border-t pt-4">
+                <h3 className="font-semibold">Create Admin</h3>
+                {adminError && <p className="text-sm text-destructive">{adminError}</p>}
+                {adminCreated && <p className="text-sm text-green-600">{adminCreated}</p>}
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="admin-email">Email</Label>
+                    <Input
+                      id="admin-email"
+                      type="email"
+                      value={adminEmail}
+                      onChange={(e) => setAdminEmail(e.target.value)}
+                      placeholder="admin@acme.com"
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="admin-password">Password</Label>
+                    <Input
+                      id="admin-password"
+                      type="password"
+                      value={adminPassword}
+                      onChange={(e) => setAdminPassword(e.target.value)}
+                      required
+                    />
+                  </div>
+                </div>
+                <Button type="submit" size="sm" disabled={createAdmin.isPending}>
+                  {createAdmin.isPending ? "Creating..." : "Create Admin"}
+                </Button>
+              </form>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="admin-password">Password</Label>
-              <Input
-                id="admin-password"
-                type="password"
-                value={adminPassword}
-                onChange={(e) => setAdminPassword(e.target.value)}
-                required
-              />
-            </div>
-          </div>
-          <Button type="submit" size="sm" disabled={createAdmin.isPending}>
-            {createAdmin.isPending ? "Creating..." : "Create Admin"}
-          </Button>
-        </form>
-      </CardContent>
-    </Card>
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -358,58 +377,56 @@ export default function PlatformConsolePage() {
         </div>
       </div>
 
-      {createOpen && (
-        <Card className="mb-8">
-          <CardHeader>
-            <CardTitle className="text-lg">Create Company</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleCreate} className="space-y-4">
-              {formError && (
-                <p className="text-sm text-destructive">{formError}</p>
-              )}
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Create Company</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleCreate} className="space-y-4">
+            {formError && (
+              <p className="text-sm text-destructive">{formError}</p>
+            )}
 
-              <div className="space-y-2">
-                <Label htmlFor="company-name">Name</Label>
-                <Input
-                  id="company-name"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="Acme Corp"
-                  required
-                />
-              </div>
+            <div className="space-y-2">
+              <Label htmlFor="company-name">Name</Label>
+              <Input
+                id="company-name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Acme Corp"
+                required
+              />
+            </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="company-slug">Slug</Label>
-                <Input
-                  id="company-slug"
-                  value={slug}
-                  onChange={(e) => setSlug(e.target.value)}
-                  placeholder="acme-corp"
-                  required
-                />
-                <p className="text-xs text-muted-foreground">
-                  lowercase letters, numbers, and hyphens only
-                </p>
-              </div>
+            <div className="space-y-2">
+              <Label htmlFor="company-slug">Slug</Label>
+              <Input
+                id="company-slug"
+                value={slug}
+                onChange={(e) => setSlug(e.target.value)}
+                placeholder="acme-corp"
+                required
+              />
+              <p className="text-xs text-muted-foreground">
+                lowercase letters, numbers, and hyphens only
+              </p>
+            </div>
 
-              <div className="flex gap-2">
-                <Button type="submit" disabled={createCompany.isPending}>
-                  {createCompany.isPending ? "Creating..." : "Create"}
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setCreateOpen(false)}
-                >
-                  Cancel
-                </Button>
-              </div>
-            </form>
-          </CardContent>
-        </Card>
-      )}
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setCreateOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={createCompany.isPending}>
+                {createCompany.isPending ? "Creating..." : "Create"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       {isLoading ? (
         <p className="text-muted-foreground">Loading companies...</p>
@@ -453,7 +470,7 @@ export default function PlatformConsolePage() {
                       size="sm"
                       onClick={() => setSelectedCompanyId(company.id)}
                     >
-                      {selectedCompanyId === company.id ? "Selected" : "Manage"}
+                      Manage
                     </Button>
                   </TableCell>
                 </TableRow>
@@ -466,7 +483,10 @@ export default function PlatformConsolePage() {
       {selectedCompanyId && (
         <CompanyDetail
           companyId={selectedCompanyId}
-          onClose={() => setSelectedCompanyId(null)}
+          open={!!selectedCompanyId}
+          onOpenChange={(open) => {
+            if (!open) setSelectedCompanyId(null);
+          }}
         />
       )}
 
