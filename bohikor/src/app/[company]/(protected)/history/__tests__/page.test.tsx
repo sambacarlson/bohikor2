@@ -53,14 +53,6 @@ describe("HistoryPage", () => {
     mockList([]);
   });
 
-  it("links 'Back to home' to the current company's home page", () => {
-    render(<HistoryPage />);
-    expect(screen.getByRole("link", { name: /back to home/i })).toHaveAttribute(
-      "href",
-      "/acme"
-    );
-  });
-
   it("shows a loading state", () => {
     useMyAdvanceRequests.mockReturnValue({
       data: undefined,
@@ -147,14 +139,6 @@ describe("HistoryPage", () => {
     await waitFor(() =>
       expect(toast.error).toHaveBeenCalledWith("Something went wrong")
     );
-  });
-
-  it("goes back when the back arrow is clicked", async () => {
-    const user = userEvent.setup();
-    render(<HistoryPage />);
-
-    await user.click(screen.getByRole("button", { name: "Go back" }));
-    expect(mockBack).toHaveBeenCalled();
   });
 
   it("refreshes when the refresh button is clicked", async () => {

@@ -70,9 +70,9 @@ export default function SignupPage() {
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-muted/50 p-4">
-      <Card className="w-full max-w-md">
+      <Card className="w-full max-w-md animate-fade-up">
         <CardHeader className="space-y-1">
-          <CardTitle className="text-2xl font-bold">Create your account</CardTitle>
+          <CardTitle className="font-heading text-2xl font-bold">Create your account</CardTitle>
           <CardDescription>
             Enter the email address your employer invited you with.
           </CardDescription>

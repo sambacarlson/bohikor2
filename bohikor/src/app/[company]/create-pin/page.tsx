@@ -72,9 +72,9 @@ export default function CreatePinPage() {
   if (!email) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-muted/50 p-4">
-        <Card className="w-full max-w-md">
+        <Card className="w-full max-w-md animate-fade-up">
           <CardHeader className="space-y-1">
-            <CardTitle className="text-2xl font-bold">Create your PIN</CardTitle>
+            <CardTitle className="font-heading text-2xl font-bold">Create your PIN</CardTitle>
             <CardDescription>
               We couldn&apos;t load your sign-up details. Please try again.
             </CardDescription>
@@ -94,9 +94,9 @@ export default function CreatePinPage() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-muted/50 p-4">
-      <Card className="w-full max-w-md">
+      <Card className="w-full max-w-md animate-fade-up">
         <CardHeader className="space-y-1">
-          <CardTitle className="text-2xl font-bold">Create your PIN</CardTitle>
+          <CardTitle className="font-heading text-2xl font-bold">Create your PIN</CardTitle>
           <CardDescription>
             Choose a 5-digit PIN to secure your account. You&apos;ll use it to sign in.
           </CardDescription>

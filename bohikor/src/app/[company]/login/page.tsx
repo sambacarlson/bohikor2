@@ -80,10 +80,10 @@ export default function EmployeeLoginPage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-muted/50 p-4">
-      <Card className="w-full max-w-md">
+    <div className="flex min-h-screen flex-col items-center justify-center bg-muted/50 p-4">
+      <Card className="w-full max-w-md animate-fade-up">
         <CardHeader className="space-y-1">
-          <CardTitle className="text-2xl font-bold">Bohikor</CardTitle>
+          <CardTitle className="font-heading text-2xl font-bold">Bohikor</CardTitle>
           <CardDescription>Sign in with your email and PIN</CardDescription>
         </CardHeader>
         <CardContent>

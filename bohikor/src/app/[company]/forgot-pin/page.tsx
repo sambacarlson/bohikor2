@@ -51,9 +51,9 @@ export default function ForgotPinPage() {
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-muted/50 p-4">
-      <Card className="w-full max-w-md">
+      <Card className="w-full max-w-md animate-fade-up">
         <CardHeader className="space-y-1">
-          <CardTitle className="text-2xl font-bold">Forgot PIN?</CardTitle>
+          <CardTitle className="font-heading text-2xl font-bold">Forgot PIN?</CardTitle>
           <CardDescription>
             Enter your email and we&apos;ll send you a verification code to reset your PIN.
           </CardDescription>

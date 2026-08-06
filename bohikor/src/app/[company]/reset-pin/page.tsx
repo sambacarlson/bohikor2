@@ -70,9 +70,9 @@ export default function ResetPinPage() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-muted/50 p-4">
-      <Card className="w-full max-w-md">
+      <Card className="w-full max-w-md animate-fade-up">
         <CardHeader className="space-y-1">
-          <CardTitle className="text-2xl font-bold">Set new PIN</CardTitle>
+          <CardTitle className="font-heading text-2xl font-bold">Set new PIN</CardTitle>
           <CardDescription>
             Choose a new 5-digit PIN for your account
           </CardDescription>

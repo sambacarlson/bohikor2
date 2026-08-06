@@ -30,10 +30,15 @@ jest.mock("sonner", () => ({
   toast: { success: jest.fn(), error: jest.fn() },
 }));
 
+jest.mock("@/hooks/use-media-query", () => ({
+  useMediaQuery: jest.fn(),
+}));
+
 const { useAuth } = jest.requireMock("@/components/providers");
 const { useAcceptTerms, useAddPhone, useChangePin, usePhoneVerificationStatus } =
   jest.requireMock("@/hooks/use-user");
 const { toast } = jest.requireMock("sonner");
+const { useMediaQuery } = jest.requireMock("@/hooks/use-media-query");
 
 const baseUser = {
   id: "1",
@@ -76,6 +81,7 @@ describe("AccountPage", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockUseSearchParams.mockReturnValue(new URLSearchParams());
+    useMediaQuery.mockReturnValue(false);
     mockHooks();
   });
 
@@ -280,19 +286,32 @@ describe("AccountPage", () => {
     expect(scrollIntoView).toHaveBeenCalled();
   });
 
-  it("signs out and navigates to login", async () => {
-    const mockSignOut = jest.fn();
-    useAuth.mockReturnValue({
-      user: baseUser,
-      signOut: mockSignOut,
-      refreshSubject: mockRefreshSubject,
+  describe("desktop layout (two-column settings)", () => {
+    beforeEach(() => {
+      useMediaQuery.mockReturnValue(true);
     });
-    const user = userEvent.setup();
-    render(<AccountPage />);
 
-    await user.click(screen.getByRole("button", { name: /sign out/i }));
-    expect(mockSignOut).toHaveBeenCalled();
-    expect(mockRefreshSubject).toHaveBeenCalled();
-    expect(mockPush).toHaveBeenCalledWith("/acme/login");
+    it("defaults to the Phone Number panel and switches panels on nav click", async () => {
+      const user = userEvent.setup();
+      render(<AccountPage />);
+
+      expect(screen.getAllByText("Phone Number").length).toBeGreaterThan(0);
+      expect(screen.queryByText("Choose a 5-digit PIN", { exact: false })).not.toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: "Change PIN" }));
+      expect(screen.getByLabelText("Current PIN")).toBeInTheDocument();
+      expect(screen.queryByLabelText("Phone number")).not.toBeInTheDocument();
+    });
+
+    it("does not scroll into view (no anchor sections to scroll to)", () => {
+      const scrollIntoView = jest.fn();
+      Element.prototype.scrollIntoView = scrollIntoView;
+
+      mockUseSearchParams.mockReturnValue(new URLSearchParams({ section: "pin" }));
+      render(<AccountPage />);
+
+      expect(scrollIntoView).not.toHaveBeenCalled();
+      expect(screen.getByLabelText("Current PIN")).toBeInTheDocument();
+    });
   });
 });

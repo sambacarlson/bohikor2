@@ -96,9 +96,9 @@ export default function VerifyPage() {
   if (!email) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-muted/50 p-4">
-        <Card className="w-full max-w-md">
+        <Card className="w-full max-w-md animate-fade-up">
           <CardHeader className="space-y-1">
-            <CardTitle className="text-2xl font-bold">Verify your email</CardTitle>
+            <CardTitle className="font-heading text-2xl font-bold">Verify your email</CardTitle>
             <CardDescription>
               We couldn&apos;t load your verification details. Please try again.
             </CardDescription>
@@ -118,9 +118,9 @@ export default function VerifyPage() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-muted/50 p-4">
-      <Card className="w-full max-w-md">
+      <Card className="w-full max-w-md animate-fade-up">
         <CardHeader className="space-y-1">
-          <CardTitle className="text-2xl font-bold">Verify your email</CardTitle>
+          <CardTitle className="font-heading text-2xl font-bold">Verify your email</CardTitle>
           <CardDescription>
             Enter the 6-digit code we sent to <span className="font-medium">{email}</span>.
           </CardDescription>

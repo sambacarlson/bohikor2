@@ -75,9 +75,8 @@ describe("EmployeeHomePage", () => {
     });
   });
 
-  it("renders the header, display name, and eligibility", () => {
+  it("renders the display name and eligibility", () => {
     render(<EmployeeHomePage />);
-    expect(screen.getByText("Bohikor")).toBeInTheDocument();
     expect(screen.getAllByText("Sarah Doe").length).toBeGreaterThan(0);
     expect(screen.getAllByText("10000 XAF").length).toBeGreaterThan(0);
     expect(screen.getByText("Eligible")).toBeInTheDocument();

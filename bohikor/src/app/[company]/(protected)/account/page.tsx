@@ -1,10 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import Link from "next/link";
-import Image from "next/image";
-import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { LogOut, Phone } from "lucide-react";
+import { useSearchParams } from "next/navigation";
+import { Phone } from "lucide-react";
 import { useAuth } from "@/components/providers";
 import {
   useAcceptTerms,
@@ -12,6 +10,8 @@ import {
   useChangePin,
   usePhoneVerificationStatus,
 } from "@/hooks/use-user";
+import { useMediaQuery } from "@/hooks/use-media-query";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -34,11 +34,19 @@ const statusText: Record<string, { label: string; className: string }> = {
   initiated: { label: "Processing…", className: "bg-yellow-100 text-yellow-700" },
 };
 
+type Section = "phone" | "pin" | "terms";
+const SECTIONS: { id: Section; label: string }[] = [
+  { id: "phone", label: "Phone Number" },
+  { id: "pin", label: "Change PIN" },
+  { id: "terms", label: "Terms & Conditions" },
+];
+
 export default function AccountPage() {
-  const router = useRouter();
-  const { company } = useParams<{ company: string }>();
   const searchParams = useSearchParams();
-  const { user, signOut, refreshSubject } = useAuth();
+  const { user, refreshSubject } = useAuth();
+  const isDesktop = useMediaQuery("(min-width: 1024px)");
+
+  const [activeSection, setActiveSection] = useState<Section>("phone");
 
   const [countryCode, setCountryCode] = useState("+237");
   const [phoneNumber, setPhoneNumber] = useState("");
@@ -72,10 +80,13 @@ export default function AccountPage() {
 
   useEffect(() => {
     const section = searchParams.get("section");
-    if (section) {
+    if (section === "phone" || section === "pin" || section === "terms") {
+      setActiveSection(section); // eslint-disable-line react-hooks/set-state-in-effect -- syncs desktop panel selection to the ?section= deep link, including changes after mount
+    }
+    if (!isDesktop && section) {
       document.getElementById(section)?.scrollIntoView({ behavior: "smooth" });
     }
-  }, [searchParams]);
+  }, [searchParams, isDesktop]);
 
   useEffect(() => {
     if (verifStatus?.phone_verified && !prevPhoneVerified.current) {
@@ -153,247 +164,264 @@ export default function AccountPage() {
     }
   };
 
-  const handleSignOut = async () => {
-    await signOut();
-    await refreshSubject();
-    router.push(`/${company}/login`);
-  };
+  const phoneContent = !phoneSubmitted && !verifStatus?.phone_number ? (
+    <div className="space-y-4">
+      <p className="text-sm text-muted-foreground">
+        Add your phone number to receive salary advances via mobile money. A small
+        verification amount will be deducted from your phone to confirm your number.
+      </p>
 
-  return (
-    <div className="min-h-screen bg-muted/50">
-      <header className="border-b bg-background">
-        <div className="mx-auto flex max-w-3xl items-center justify-between px-6 py-4">
-          <div className="flex items-center gap-2">
-            <Image src="/logo.png" alt="" width={24} height={24} />
-            <span className="text-xl font-bold">Bohikor</span>
-          </div>
-          <Link href={`/${company}`} className="text-sm text-muted-foreground hover:underline">
-            Back to home
-          </Link>
+      <div className="flex gap-3">
+        <div className="w-24 space-y-2">
+          <Label htmlFor="country-code">Country code</Label>
+          <Input
+            id="country-code"
+            value={countryCode}
+            onChange={(e) =>
+              setCountryCode(
+                e.target.value.startsWith("+") ? e.target.value : `+${e.target.value}`
+              )
+            }
+            inputMode="tel"
+          />
         </div>
-      </header>
+        <div className="flex-1 space-y-2">
+          <Label htmlFor="phone-number">Phone number</Label>
+          <Input
+            id="phone-number"
+            placeholder="6XXXXXXXX"
+            inputMode="tel"
+            value={phoneNumber}
+            onChange={(e) => setPhoneNumber(e.target.value.replace(/[^\d]/g, ""))}
+          />
+        </div>
+      </div>
 
-      <main className="mx-auto max-w-3xl space-y-6 px-6 py-6">
-        <h1 className="text-2xl font-bold">Account</h1>
+      {phoneError && (
+        <p className="text-sm text-destructive">{phoneError}</p>
+      )}
 
-        <Card id="phone">
-          <CardHeader className="space-y-1">
-            <CardTitle className="flex items-center gap-2">
-              <Phone className="h-4 w-4" />
-              Phone Number
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {!phoneSubmitted && !verifStatus?.phone_number ? (
-              <div className="space-y-4">
-                <p className="text-sm text-muted-foreground">
-                  Add your phone number to receive salary advances via mobile money. A small
-                  verification amount will be deducted from your phone to confirm your number.
-                </p>
+      <Button onClick={handleAddPhone} disabled={addPhone.isPending} className="w-full">
+        {addPhone.isPending ? "Submitting..." : "Verify Phone Number"}
+      </Button>
+    </div>
+  ) : (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <span className="text-sm text-muted-foreground">Phone</span>
+        <span>{verifStatus?.phone_number || fullPhone}</span>
+      </div>
+      <div className="flex items-center justify-between">
+        <span className="text-sm text-muted-foreground">Verified</span>
+        <span>{verifStatus?.phone_verified ? "Yes" : "No"}</span>
+      </div>
 
-                <div className="flex gap-3">
-                  <div className="w-24 space-y-2">
-                    <Label htmlFor="country-code">Country code</Label>
-                    <Input
-                      id="country-code"
-                      value={countryCode}
-                      onChange={(e) =>
-                        setCountryCode(
-                          e.target.value.startsWith("+") ? e.target.value : `+${e.target.value}`
-                        )
-                      }
-                      inputMode="tel"
-                    />
-                  </div>
-                  <div className="flex-1 space-y-2">
-                    <Label htmlFor="phone-number">Phone number</Label>
-                    <Input
-                      id="phone-number"
-                      placeholder="6XXXXXXXX"
-                      inputMode="tel"
-                      value={phoneNumber}
-                      onChange={(e) => setPhoneNumber(e.target.value.replace(/[^\d]/g, ""))}
-                    />
-                  </div>
-                </div>
+      {ussdCode && (
+        <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-4">
+          <p className="mb-1 text-sm font-bold text-yellow-800">
+            Dial the USSD code on your phone
+          </p>
+          <p className="mb-1 font-mono text-lg text-yellow-900">{ussdCode}</p>
+          <p className="text-xs text-yellow-700">
+            Enter your mobile money PIN when prompted. Verification will complete
+            automatically.
+          </p>
+        </div>
+      )}
 
-                {phoneError && (
-                  <p className="text-sm text-destructive">{phoneError}</p>
-                )}
+      {status && (
+        <div className="flex items-center justify-between">
+          <span className="text-sm text-muted-foreground">Status</span>
+          <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${status.className}`}>
+            {status.label}
+          </span>
+        </div>
+      )}
 
-                <Button onClick={handleAddPhone} disabled={addPhone.isPending} className="w-full">
-                  {addPhone.isPending ? "Submitting..." : "Verify Phone Number"}
-                </Button>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-muted-foreground">Phone</span>
-                  <span>{verifStatus?.phone_number || fullPhone}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-muted-foreground">Verified</span>
-                  <span>{verifStatus?.phone_verified ? "Yes" : "No"}</span>
-                </div>
-
-                {ussdCode && (
-                  <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-4">
-                    <p className="mb-1 text-sm font-bold text-yellow-800">
-                      Dial the USSD code on your phone
-                    </p>
-                    <p className="mb-1 font-mono text-lg text-yellow-900">{ussdCode}</p>
-                    <p className="text-xs text-yellow-700">
-                      Enter your mobile money PIN when prompted. Verification will complete
-                      automatically.
-                    </p>
-                  </div>
-                )}
-
-                {status && (
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-muted-foreground">Status</span>
-                    <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${status.className}`}>
-                      {status.label}
-                    </span>
-                  </div>
-                )}
-
-                {canRetry && (
-                  <Button
-                    variant="outline"
-                    className="w-full"
-                    onClick={() => {
-                      setPhoneSubmitted(false);
-                      setPhoneNumber("");
-                    }}
-                  >
-                    Try Again
-                  </Button>
-                )}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card id="pin">
-          <CardHeader className="space-y-1">
-            <CardTitle>Change PIN</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleChangePin} className="space-y-4">
-              {pinError && <p className="text-sm text-destructive">{pinError}</p>}
-
-              <div className="space-y-2">
-                <Label htmlFor="current-pin">Current PIN</Label>
-                <Input
-                  id="current-pin"
-                  type="password"
-                  inputMode="numeric"
-                  maxLength={5}
-                  placeholder="00000"
-                  value={currentPin}
-                  onChange={(e) => setCurrentPin(e.target.value.replace(/\D/g, ""))}
-                  required
-                  autoComplete="current-password"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="new-pin">New PIN</Label>
-                <Input
-                  id="new-pin"
-                  type="password"
-                  inputMode="numeric"
-                  maxLength={5}
-                  placeholder="00000"
-                  value={newPin}
-                  onChange={(e) => setNewPin(e.target.value.replace(/\D/g, ""))}
-                  required
-                  autoComplete="new-password"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="confirm-new-pin">Confirm New PIN</Label>
-                <Input
-                  id="confirm-new-pin"
-                  type="password"
-                  inputMode="numeric"
-                  maxLength={5}
-                  placeholder="00000"
-                  value={confirmPin}
-                  onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, ""))}
-                  required
-                  autoComplete="new-password"
-                />
-              </div>
-
-              <Button type="submit" className="w-full" disabled={changePin.isPending}>
-                {changePin.isPending ? "Changing..." : "Change PIN"}
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
-
-        <Card id="terms">
-          <CardHeader className="space-y-1">
-            <CardTitle>Terms &amp; Conditions</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {user.is_terms_accepted ? (
-              <div className="space-y-2">
-                <p className="font-semibold">Terms Already Accepted</p>
-                <p className="text-sm text-muted-foreground">
-                  You have already accepted the terms and conditions.
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                <ol className="list-decimal space-y-2 pl-5 text-sm text-muted-foreground">
-                  {TERMS.map((point) => (
-                    <li key={point}>{point}</li>
-                  ))}
-                </ol>
-
-                <label className="flex cursor-pointer items-start gap-3">
-                  <input
-                    type="checkbox"
-                    className="mt-0.5 h-4 w-4 accent-primary"
-                    checked={termsAccepted}
-                    onChange={(e) => setTermsAccepted(e.target.checked)}
-                  />
-                  <span className="text-sm">
-                    I have read and accept the terms and conditions
-                  </span>
-                </label>
-
-                <Button
-                  onClick={handleAcceptTerms}
-                  disabled={!termsAccepted || acceptTerms.isPending}
-                  className="w-full"
-                >
-                  {acceptTerms.isPending ? "Accepting..." : "Accept Terms"}
-                </Button>
-
-                {acceptTerms.isError && (
-                  <p className="text-center text-sm text-destructive">
-                    Failed to accept terms. Please try again.
-                  </p>
-                )}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
+      {canRetry && (
         <Button
           variant="outline"
-          className="w-full text-destructive hover:text-destructive"
-          onClick={handleSignOut}
+          className="w-full"
+          onClick={() => {
+            setPhoneSubmitted(false);
+            setPhoneNumber("");
+          }}
         >
-          <LogOut className="mr-2 h-4 w-4" />
-          Sign Out
+          Try Again
         </Button>
-      </main>
+      )}
+    </div>
+  );
+
+  const pinContent = (
+    <form onSubmit={handleChangePin} className="space-y-4">
+      {pinError && <p className="text-sm text-destructive">{pinError}</p>}
+
+      <div className="space-y-2">
+        <Label htmlFor="current-pin">Current PIN</Label>
+        <Input
+          id="current-pin"
+          type="password"
+          inputMode="numeric"
+          maxLength={5}
+          placeholder="00000"
+          value={currentPin}
+          onChange={(e) => setCurrentPin(e.target.value.replace(/\D/g, ""))}
+          required
+          autoComplete="current-password"
+        />
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="new-pin">New PIN</Label>
+        <Input
+          id="new-pin"
+          type="password"
+          inputMode="numeric"
+          maxLength={5}
+          placeholder="00000"
+          value={newPin}
+          onChange={(e) => setNewPin(e.target.value.replace(/\D/g, ""))}
+          required
+          autoComplete="new-password"
+        />
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="confirm-new-pin">Confirm New PIN</Label>
+        <Input
+          id="confirm-new-pin"
+          type="password"
+          inputMode="numeric"
+          maxLength={5}
+          placeholder="00000"
+          value={confirmPin}
+          onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, ""))}
+          required
+          autoComplete="new-password"
+        />
+      </div>
+
+      <Button type="submit" className="w-full" disabled={changePin.isPending}>
+        {changePin.isPending ? "Changing..." : "Change PIN"}
+      </Button>
+    </form>
+  );
+
+  const termsContent = user.is_terms_accepted ? (
+    <div className="space-y-2">
+      <p className="font-semibold">Terms Already Accepted</p>
+      <p className="text-sm text-muted-foreground">
+        You have already accepted the terms and conditions.
+      </p>
+    </div>
+  ) : (
+    <div className="space-y-4">
+      <ol className="list-decimal space-y-2 pl-5 text-sm text-muted-foreground">
+        {TERMS.map((point) => (
+          <li key={point}>{point}</li>
+        ))}
+      </ol>
+
+      <label className="flex cursor-pointer items-start gap-3">
+        <input
+          type="checkbox"
+          className="mt-0.5 h-4 w-4 accent-primary"
+          checked={termsAccepted}
+          onChange={(e) => setTermsAccepted(e.target.checked)}
+        />
+        <span className="text-sm">
+          I have read and accept the terms and conditions
+        </span>
+      </label>
+
+      <Button
+        onClick={handleAcceptTerms}
+        disabled={!termsAccepted || acceptTerms.isPending}
+        className="w-full"
+      >
+        {acceptTerms.isPending ? "Accepting..." : "Accept Terms"}
+      </Button>
+
+      {acceptTerms.isError && (
+        <p className="text-center text-sm text-destructive">
+          Failed to accept terms. Please try again.
+        </p>
+      )}
+    </div>
+  );
+
+  const sectionContent: Record<Section, React.ReactNode> = {
+    phone: phoneContent,
+    pin: pinContent,
+    terms: termsContent,
+  };
+
+  if (isDesktop) {
+    return (
+      <div className="flex max-w-[720px] gap-8">
+        <div className="w-44 shrink-0">
+          <h1 className="font-heading mb-4 text-2xl font-bold">Account</h1>
+          <nav className="space-y-1">
+            {SECTIONS.map((section) => (
+              <button
+                key={section.id}
+                onClick={() => setActiveSection(section.id)}
+                className={cn(
+                  "block w-full rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors",
+                  activeSection === section.id
+                    ? "bg-primary/10 text-primary"
+                    : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                )}
+              >
+                {section.label}
+              </button>
+            ))}
+          </nav>
+        </div>
+
+        <div className="min-w-0 flex-1">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                {activeSection === "phone" && <Phone className="h-4 w-4" />}
+                {SECTIONS.find((s) => s.id === activeSection)?.label}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>{sectionContent[activeSection]}</CardContent>
+          </Card>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mx-auto max-w-[620px] space-y-5">
+      <h1 className="font-heading text-2xl font-bold">Account</h1>
+
+      <Card id="phone">
+        <CardHeader className="space-y-1">
+          <CardTitle className="flex items-center gap-2">
+            <Phone className="h-4 w-4" />
+            Phone Number
+          </CardTitle>
+        </CardHeader>
+        <CardContent>{phoneContent}</CardContent>
+      </Card>
+
+      <Card id="pin">
+        <CardHeader className="space-y-1">
+          <CardTitle>Change PIN</CardTitle>
+        </CardHeader>
+        <CardContent>{pinContent}</CardContent>
+      </Card>
+
+      <Card id="terms">
+        <CardHeader className="space-y-1">
+          <CardTitle>Terms & Conditions</CardTitle>
+        </CardHeader>
+        <CardContent>{termsContent}</CardContent>
+      </Card>
     </div>
   );
 }
