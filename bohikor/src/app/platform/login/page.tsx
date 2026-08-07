@@ -1,12 +1,15 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Link from "next/link";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { setTokens, setSubjectHint } from "@/lib/auth";
 import { useAuth } from "@/components/providers";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
 import {
   Card,
@@ -57,13 +60,18 @@ export default function PlatformLoginPage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-muted/50 p-4">
-      <Card className="w-full max-w-md">
-        <CardHeader className="space-y-1">
-          <CardTitle className="text-2xl font-bold">Platform Admin</CardTitle>
+    <div className="flex min-h-screen flex-col items-center justify-center bg-muted/50 p-4">
+      <div className="mb-6 flex flex-row items-center gap-2">
+        <Image src="/logo.png" alt="Bohikor" width={24} height={24} className="rounded-md" />
+        <span className="text-xs font-semibold tracking-wide text-muted-foreground">BOHIKOR</span>
+      </div>
+
+      <Card className="w-full max-w-md animate-fade-up py-6">
+        <CardHeader className="space-y-1 px-6">
+          <CardTitle className="font-heading text-2xl font-bold">Platform Admin</CardTitle>
           <CardDescription>Sign in as a platform administrator</CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="px-6">
           <form onSubmit={handleSubmit} className="space-y-4">
             {error && (
               <Alert variant="destructive">
@@ -85,9 +93,8 @@ export default function PlatformLoginPage() {
 
             <div className="space-y-2">
               <Label htmlFor="password">Password</Label>
-              <Input
+              <PasswordInput
                 id="password"
-                type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
@@ -101,6 +108,13 @@ export default function PlatformLoginPage() {
           </form>
         </CardContent>
       </Card>
+
+      <Link
+        href="/"
+        className="mt-4 text-sm text-muted-foreground underline-offset-4 hover:text-primary hover:underline"
+      >
+        Not a platform administrator?
+      </Link>
     </div>
   );
 }

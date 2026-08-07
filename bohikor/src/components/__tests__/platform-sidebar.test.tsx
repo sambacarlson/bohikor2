@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { PlatformSidebar } from "../platform-sidebar";
 
 const mockSignOut = jest.fn();
+const mockRefreshSubject = jest.fn();
 const mockPush = jest.fn();
 const mockToggle = jest.fn();
 let mockCollapsed = false;
@@ -13,7 +14,7 @@ jest.mock("next/navigation", () => ({
 }));
 
 jest.mock("@/components/providers", () => ({
-  useAuth: () => ({ signOut: mockSignOut }),
+  useAuth: () => ({ signOut: mockSignOut, refreshSubject: mockRefreshSubject }),
 }));
 
 jest.mock("@/hooks/use-sidebar-collapse", () => ({
@@ -52,6 +53,7 @@ describe("PlatformSidebar", () => {
     await user.click(screen.getByRole("button", { name: "Sign Out" }));
 
     expect(mockSignOut).toHaveBeenCalled();
+    expect(mockRefreshSubject).toHaveBeenCalled();
     expect(mockPush).toHaveBeenCalledWith("/platform/login");
   });
 

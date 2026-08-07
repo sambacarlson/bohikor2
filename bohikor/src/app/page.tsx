@@ -6,7 +6,7 @@ export default function LandingPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-muted/50 p-4">
       <Card className="w-full max-w-md animate-fade-up">
-        <CardHeader className="items-center gap-3 pt-6 text-center">
+        <CardHeader className="items-center justify-items-center gap-3 pt-6 text-center">
           <Image src="/logo.png" alt="Bohikor" width={40} height={40} />
           <div>
             <h1 className="font-heading text-2xl font-bold tracking-tight">Bohikor</h1>

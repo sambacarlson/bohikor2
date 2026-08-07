@@ -13,7 +13,7 @@ import { LayoutDashboard, LogOut, PanelLeftClose, PanelLeftOpen } from "lucide-r
 export function PlatformSidebar() {
   const pathname = usePathname();
   const router = useRouter();
-  const { signOut } = useAuth();
+  const { signOut, refreshSubject } = useAuth();
   const { collapsed, toggle, hydrated } = useSidebarCollapse();
 
   const navItems = [{ href: "/platform", label: "Dashboard", icon: LayoutDashboard }];
@@ -65,6 +65,7 @@ export function PlatformSidebar() {
         <button
           onClick={async () => {
             await signOut();
+            await refreshSubject();
             router.push("/platform/login");
           }}
           title={collapsed ? "Sign Out" : undefined}

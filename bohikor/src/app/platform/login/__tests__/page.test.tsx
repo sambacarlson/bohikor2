@@ -43,6 +43,9 @@ describe("PlatformLoginPage", () => {
     expect(screen.getByLabelText(/email/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/password/i)).toBeInTheDocument();
     expect(screen.getByText("Sign In")).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: /not a platform administrator/i })
+    ).toHaveAttribute("href", "/");
   });
 
   it("redirects to /platform immediately when already a platform_admin", () => {

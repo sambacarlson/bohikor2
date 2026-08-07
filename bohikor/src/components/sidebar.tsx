@@ -25,7 +25,7 @@ export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const { company } = useParams<{ company: string }>();
-  const { signOut } = useAuth();
+  const { signOut, refreshSubject } = useAuth();
   const { collapsed, toggle, hydrated } = useSidebarCollapse();
 
   const navItems = [
@@ -82,6 +82,7 @@ export function Sidebar() {
         <button
           onClick={async () => {
             await signOut();
+            await refreshSubject();
             router.push(`/${company}/admin/login`);
           }}
           title={collapsed ? "Sign Out" : undefined}

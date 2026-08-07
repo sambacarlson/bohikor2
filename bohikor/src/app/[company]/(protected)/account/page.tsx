@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { Phone } from "lucide-react";
+import { Check, Phone } from "lucide-react";
 import { useAuth } from "@/components/providers";
 import {
   useAcceptTerms,
@@ -14,6 +14,7 @@ import { useMediaQuery } from "@/hooks/use-media-query";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { extractApiError } from "@/lib/errors";
@@ -259,9 +260,8 @@ export default function AccountPage() {
 
       <div className="space-y-2">
         <Label htmlFor="current-pin">Current PIN</Label>
-        <Input
+        <PasswordInput
           id="current-pin"
-          type="password"
           inputMode="numeric"
           maxLength={5}
           placeholder="00000"
@@ -274,9 +274,8 @@ export default function AccountPage() {
 
       <div className="space-y-2">
         <Label htmlFor="new-pin">New PIN</Label>
-        <Input
+        <PasswordInput
           id="new-pin"
-          type="password"
           inputMode="numeric"
           maxLength={5}
           placeholder="00000"
@@ -289,9 +288,8 @@ export default function AccountPage() {
 
       <div className="space-y-2">
         <Label htmlFor="confirm-new-pin">Confirm New PIN</Label>
-        <Input
+        <PasswordInput
           id="confirm-new-pin"
-          type="password"
           inputMode="numeric"
           maxLength={5}
           placeholder="00000"
@@ -308,45 +306,49 @@ export default function AccountPage() {
     </form>
   );
 
-  const termsContent = user.is_terms_accepted ? (
-    <div className="space-y-2">
-      <p className="font-semibold">Terms Already Accepted</p>
-      <p className="text-sm text-muted-foreground">
-        You have already accepted the terms and conditions.
-      </p>
-    </div>
-  ) : (
+  const termsContent = (
     <div className="space-y-4">
+      {user.is_terms_accepted && (
+        <p className="flex items-center gap-2 text-sm font-medium text-green-600">
+          <Check className="h-4 w-4" />
+          You&apos;ve accepted these terms
+        </p>
+      )}
+
       <ol className="list-decimal space-y-2 pl-5 text-sm text-muted-foreground">
         {TERMS.map((point) => (
           <li key={point}>{point}</li>
         ))}
       </ol>
 
-      <label className="flex cursor-pointer items-start gap-3">
-        <input
-          type="checkbox"
-          className="mt-0.5 h-4 w-4 accent-primary"
-          checked={termsAccepted}
-          onChange={(e) => setTermsAccepted(e.target.checked)}
-        />
-        <span className="text-sm">
-          I have read and accept the terms and conditions
-        </span>
-      </label>
+      {!user.is_terms_accepted && (
+        <>
+          <label className="flex cursor-pointer items-start gap-3">
+            <input
+              type="checkbox"
+              className="mt-0.5 h-4 w-4 accent-primary"
+              checked={termsAccepted}
+              onChange={(e) => setTermsAccepted(e.target.checked)}
+            />
+            <span className="text-sm">
+              I have read and accept the terms and conditions
+            </span>
+          </label>
 
-      <Button
-        onClick={handleAcceptTerms}
-        disabled={!termsAccepted || acceptTerms.isPending}
-        className="w-full"
-      >
-        {acceptTerms.isPending ? "Accepting..." : "Accept Terms"}
-      </Button>
+          <Button
+            onClick={handleAcceptTerms}
+            disabled={!termsAccepted || acceptTerms.isPending}
+            className="w-full"
+          >
+            {acceptTerms.isPending ? "Accepting..." : "Accept Terms"}
+          </Button>
 
-      {acceptTerms.isError && (
-        <p className="text-center text-sm text-destructive">
-          Failed to accept terms. Please try again.
-        </p>
+          {acceptTerms.isError && (
+            <p className="text-center text-sm text-destructive">
+              Failed to accept terms. Please try again.
+            </p>
+          )}
+        </>
       )}
     </div>
   );

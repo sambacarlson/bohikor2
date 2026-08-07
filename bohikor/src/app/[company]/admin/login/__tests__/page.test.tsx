@@ -44,13 +44,17 @@ describe("AdminLoginPage", () => {
 
   it("renders admin login form", () => {
     render(<AdminLoginPage />);
-    expect(screen.getByText("Bohikor2 Admin")).toBeInTheDocument();
+    expect(screen.getByText("acme")).toBeInTheDocument();
     expect(
       screen.getByText(/enter your credentials/i)
     ).toBeInTheDocument();
     expect(screen.getByLabelText(/email/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/password/i)).toBeInTheDocument();
     expect(screen.getByText("Sign In")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /employee\? sign in/i })).toHaveAttribute(
+      "href",
+      "/acme/login"
+    );
   });
 
   it("calls api post on form submit", async () => {

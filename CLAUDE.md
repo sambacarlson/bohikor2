@@ -6,27 +6,26 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 flow diagrams, code style, security rules, deploy checklist). Read it first — this file adds
 architecture detail and command references that complement it rather than repeat it.
 
-## Current state (2026, mid-pivot)
+## Current state (2026, pivot complete)
 
-The project is a single-company salary-advance app **pivoting to multi-tenant** per `PLAN.md`
-(Epics 6–9). Epic 6 (multi-tenant backend) and Epic 7 (payout reliability & float) are both done,
-merged to `main`. Concretely this means:
+The project is a multi-tenant salary-advance app — originally single-company, **pivoted to
+multi-tenant** per `PLAN.md` (Epics 6–9, all shipped and merged to `main`). Concretely this means:
 
-- Every domain table now has `company_id`; a `companies` table and `platform_admins` (global
+- Every domain table has `company_id`; a `companies` table and `platform_admins` (global
   super-admins) exist alongside the original `admins`/`users`.
-- `admin/` has been renamed to `bohikor/` (Epic 8 task 1) — the directory move is done, but it is
-  still the pre-pivot Next.js dashboard underneath. The route restructuring, unified employee/
-  platform/admin screens, and de-shadcn work described in Epic 8 tasks 2–7 have not landed yet. Don't
-  assume routes like `/{company}/admin` exist until those tasks land.
-- `mobile/` is pre-pivot and will eventually be frozen (Epic 9), but is still the primary employee
-  client for now.
+- `admin/` was renamed to `bohikor/` and de-shadcn'd onto bare Radix + Tailwind (Epic 8). Routes
+  like `/{company}`, `/{company}/admin`, and `/platform` exist and make up the unified employee/
+  company-admin/platform-admin web app, followed by several rounds of UI/UX polish on top of that
+  baseline (dark-default theme, collapsible sidebars, adaptive modals, employee dashboard redesign).
+- `mobile/` is frozen (Epic 9) — kept for reference, no longer the primary employee client; the
+  web app under `bohikor/` is.
 - The migration set is greenfield and rewritten in place — there is no production data to preserve,
   so `backend/migrations/000001_schema.up/down.sql` is the *only* migration pair. New schema changes
-  should extend or replace this file rather than accumulate numbered migrations mid-epic, until the
-  baseline stabilizes.
+  should extend or replace this file rather than accumulate numbered migrations, until a real
+  production dataset exists.
 
-Check `PLAN.md` for the target end-state and per-epic task breakdown before assuming a feature
-described there already exists — it documents both shipped work and the plan.
+Check `PLAN.md` for shipped history and `docs/brief.md` / `docs/schema.md` for the current
+architecture and domain model in detail.
 
 ## Commands
 
@@ -129,6 +128,8 @@ request) creates a fresh row through the same eligibility+float+Campay flow; com
 ## Git/PR workflow
 
 Never delete remote branches.
+
+Always squash and merge PRs (`gh pr merge --squash`), never a plain merge commit or rebase-merge.
 
 ## Frontend architecture
 

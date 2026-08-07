@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useResetPin } from "@/hooks/use-user";
 import { useAuth } from "@/components/providers";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
 import {
   Card,
@@ -87,9 +87,8 @@ export default function ResetPinPage() {
 
             <div className="space-y-2">
               <Label htmlFor="new-pin">New PIN</Label>
-              <Input
+              <PasswordInput
                 id="new-pin"
-                type="password"
                 inputMode="numeric"
                 maxLength={5}
                 placeholder="00000"
@@ -102,9 +101,8 @@ export default function ResetPinPage() {
 
             <div className="space-y-2">
               <Label htmlFor="confirm-pin">Confirm PIN</Label>
-              <Input
+              <PasswordInput
                 id="confirm-pin"
-                type="password"
                 inputMode="numeric"
                 maxLength={5}
                 placeholder="00000"

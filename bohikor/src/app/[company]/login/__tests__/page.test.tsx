@@ -47,6 +47,7 @@ describe("EmployeeLoginPage", () => {
 
   it("renders the login form and secondary links", () => {
     render(<EmployeeLoginPage />);
+    expect(screen.getByText("acme")).toBeInTheDocument();
     expect(screen.getByLabelText(/email/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/pin/i)).toBeInTheDocument();
     expect(screen.getByText("Sign In")).toBeInTheDocument();
@@ -57,6 +58,10 @@ describe("EmployeeLoginPage", () => {
     expect(screen.getByRole("link", { name: /new here\? sign up/i })).toHaveAttribute(
       "href",
       "/acme/signup"
+    );
+    expect(screen.getByRole("link", { name: /company admin\? sign in/i })).toHaveAttribute(
+      "href",
+      "/acme/admin/login"
     );
   });
 

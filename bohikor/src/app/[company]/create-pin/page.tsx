@@ -7,7 +7,7 @@ import { useCreatePin } from "@/hooks/use-auth";
 import { setSubjectHint, setTokens } from "@/lib/auth";
 import { useAuth } from "@/components/providers";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
 import {
   Card,
@@ -125,9 +125,8 @@ export default function CreatePinPage() {
 
             <div className="space-y-2">
               <Label htmlFor="pin">PIN</Label>
-              <Input
+              <PasswordInput
                 id="pin"
-                type="password"
                 inputMode="numeric"
                 maxLength={5}
                 placeholder="00000"
@@ -140,9 +139,8 @@ export default function CreatePinPage() {
 
             <div className="space-y-2">
               <Label htmlFor="confirm-pin">Confirm PIN</Label>
-              <Input
+              <PasswordInput
                 id="confirm-pin"
-                type="password"
                 inputMode="numeric"
                 maxLength={5}
                 placeholder="00000"

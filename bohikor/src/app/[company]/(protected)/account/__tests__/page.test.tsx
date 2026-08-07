@@ -268,11 +268,15 @@ describe("AccountPage", () => {
       await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Terms accepted"));
     });
 
-    it("shows the already-accepted state when terms are accepted", () => {
+    it("shows an accepted note and hides the checkbox/button, but keeps the terms text visible", () => {
       mockHooks({ user: { ...baseUser, is_terms_accepted: true } });
       render(<AccountPage />);
-      expect(screen.getByText("Terms Already Accepted")).toBeInTheDocument();
+      expect(screen.getByText("You've accepted these terms")).toBeInTheDocument();
+      expect(
+        screen.getByText(/This is a one-time salary advance/)
+      ).toBeInTheDocument();
       expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /accept terms/i })).not.toBeInTheDocument();
     });
   });
 
