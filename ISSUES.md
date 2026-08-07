@@ -1,111 +1,228 @@
 # Known issues
 
-## - [ ] `sql.NullTime` fields serialize as `{Time, Valid}` objects, not plain nullable strings
+Ordered by priority for execution. Each item was re-verified 2026-08-07 against current code
+(agents cited file:line) before being carried forward — see each entry's "Verified" line.
 
-Any sqlc-generated Go field typed `sql.NullTime` (the mapping CLAUDE.md documents for nullable
-`timestamptz` columns) has no custom JSON marshaling, so it serializes as a nested object —
-`{"Time": "2026-01-01T00:00:00Z", "Valid": true}` when set, `{"Time":
-"0001-01-01T00:00:00Z", "Valid": false}` when null — never a plain ISO string or `null`. Verified
-empirically (`go run` a small marshal test against `database/sql.NullTime` directly). This is
-unlike every `pgtype.*` type used elsewhere in this codebase (`pgtype.Text`, `pgtype.UUID`,
-`pgtype.Numeric`), which do implement clean JSON marshaling (plain string/number, or `null`) —
-also verified empirically.
+## - [ ] 1. `GET /api/users/me` leaks the employee's bcrypt PIN hash and lockout fields
 
-Confirmed affected fields: `AdvanceRequest.last_reconciled_at` / `next_retry_at` (exposed by the
-new `GET /api/platform/requests/needs-review` endpoint), and `User.terms_accepted_at` /
-`locked_until` (exposed via `sanitizeUser()` in `internal/handler/auth.go` and the raw
-`GET /api/users/me` response). Any nullable-timestamptz column follows the same pattern —
-this list is what's actually reachable from the frontend today, not necessarily exhaustive.
+`handleUserMe` (`backend/internal/server/routes.go:17-41`) returns the raw `db.User` struct via
+`c.JSON(http.StatusOK, gin.H{"data": user})`. `db.User.PinHash` (`db/sqlc/models.go:325`) has no
+redaction tag, so every response includes the bcrypt PIN hash plus `failed_login_attempts`,
+`locked_until`, `user_ip_at_consent`. `sanitizeUser()` (`internal/handler/auth.go:800-815`)
+already exists as the allowlisted fix (used by Login/CreatePin/VerifyEmailOTP) but is never called
+from `routes.go`.
 
-**Recommended fix:** either (a) have `db/sqlc.yaml` override nullable `timestamptz` columns to
-`pgtype.Timestamptz` instead of the stdlib `sql.NullTime` (pgtype's version already marshals
-correctly, matching the pattern already used for `pgtype.Text`/`pgtype.UUID`/`pgtype.Numeric`), or
-(b) add explicit conversion in each handler that returns one of these fields (mirroring the
-existing `numericToString()` helper in `internal/handler/platform.go` for `pgtype.Numeric`).
+**Fix:** route `handleUserMe` through `sanitizeUser()` (or equivalent) instead of the raw struct.
 
-**Not currently blocking anything** — `complete-epic-8.md` was corrected (2026-08-05) to type
-these fields as `unknown` on the frontend and explicitly instructs never rendering them, so no
-planned Epic 8 screen depends on this being fixed. Worth fixing before any future feature actually
-needs to display one of these timestamps (e.g. "reconciled 3 attempts ago, last at...").
+**Verified 2026-08-07: still valid**, confirmed at the cited lines.
 
-Found 2026-08-05 while verifying the two new backend endpoints (`GET /api/admin/ledger`,
-`GET /api/platform/requests/{needs-review,health}`) for the Epic 8 frontend plan.
+## - [ ] 2. `sql.NullTime` fields serialize as `{Time, Valid}` objects, not plain nullable strings
 
-## - [ ] `amount_xaf` fields serialize as JSON numbers but are typed `string` in the frontend
+`db/sqlc.yaml:24-29` maps nullable `timestamptz` → `database/sql.NullTime`, which has no custom
+`MarshalJSON`. Confirmed affected fields (`db/sqlc/models.go`): `AdvanceRequest.LastReconciledAt`/
+`NextRetryAt` (211-212, exposed via `GET /api/platform/requests/needs-review`),
+`User.LockedUntil`/`TermsAcceptedAt` (327, 330), `PhoneVerification.BlockedUntil` (252),
+`Invitation.AcceptedAt` (275). Scope is **broader than originally logged**: `TermsAcceptedAt` also
+leaks this shape through `sanitizeUser()` itself (`auth.go:800-815`), so even the "sanitized"
+Login/CreatePin/VerifyEmailOTP responses carry it — not just the raw `/me` endpoint from issue 1.
+Unlike `pgtype.*` types used elsewhere (`pgtype.Text`, `pgtype.UUID`, `pgtype.Numeric`), which
+marshal cleanly.
 
-`pgtype.Numeric` fields returned raw (i.e. not pre-converted via `numericToString()`, which
-`balance_xaf` always is) serialize as a plain JSON **number** — e.g. `15000.50`, not `"15000.50"`
-— verified empirically. This affects every `amount_xaf` field returned as part of an
-`advance_requests` or `company_ledger` row: `AdvanceRequest.amount_xaf` (all advance-request
-endpoints, pre-existing — not introduced by this session's work) and
-`LedgerEntry.amount_xaf` (new, `GET /api/admin/ledger`'s `entries` array). `bohikor/src/types`
-has always typed `AdvanceRequest.amount_xaf` as `string`, which doesn't match the actual wire
-value; nothing has broken yet because JSX/template-literal interpolation coerces either type to
-the same displayed text, but any code calling a string-only method on it (`.startsWith()`,
-`.includes()`, etc.) will throw at runtime — this nearly shipped as a bug in `complete-epic-8.md`
-step 18's original "red text if the value starts with `-`" instruction, caught and fixed
-2026-08-05 to use `Number(entry.amount_xaf) < 0` instead.
+**Fix:** override nullable `timestamptz` → `pgtype.Timestamptz` in `db/sqlc.yaml` (marshals
+correctly, consistent with the rest of the schema) rather than patching every handler individually.
 
-**Recommended fix:** for currency-precision safety (floating-point JSON numbers are not a safe
-representation for money), convert every `amount_xaf`-bearing response to a string server-side,
-the same way `balance_xaf` already is via `numericToString()` — either add the same conversion to
-each handler that returns raw `AdvanceRequest`/`CompanyLedger` rows, or (bigger change) have sqlc
-map `numeric` columns to a wrapper type with custom string-producing JSON marshaling instead of
-raw `pgtype.Numeric`.
+**Verified 2026-08-07: still valid, scope expanded.**
 
-**Not blocking** — `complete-epic-8.md`'s Reference section now has an explicit "wire-shape
-gotchas" note instructing safe (type-agnostic) handling of this field everywhere it's used.
+## - [ ] 3. `amount_xaf` fields serialize as JSON numbers but are typed `string` in the frontend
 
-Found 2026-08-05, same verification pass as above.
+`AdvanceRequest.AmountXaf`, `LedgerEntry.AmountXaf` (`db/sqlc/models.go:205,233,284`) are
+`pgtype.Numeric`, returned raw (not through `numericToString()`, which only `balance_xaf` uses —
+`internal/handler/ledger.go:54`, `platform.go:110,150,287,344`). `pgtype.Numeric` marshals as a
+JSON number, e.g. `15000.50`. `bohikor/src/types/index.ts:85,106,142` still types these fields
+`string` — a currency-precision mismatch (unsafe for money) that hasn't broken yet only because
+JSX interpolation coerces either type to the same displayed text.
 
-## - [ ] `FRONTEND_BASE_URL` defaults to `http://localhost:3000` with no deploy-checklist entry
+**Fix:** convert every `amount_xaf`-bearing response to a string server-side, same pattern as
+`numericToString()` for `balance_xaf`.
 
-`backend/internal/config/config.go`'s `FrontendBaseURL` (added for the invitation-email signup
-link) defaults to `http://localhost:3000` if the env var isn't set. `AGENTS.md`'s deploy/pre-push
-checklist doesn't mention this variable. If it's forgotten when configuring the production
-environment (Render), every invitation email sent from production will link to a broken
-`localhost` URL instead of the real deployed frontend — a silent failure that would only surface
-when an invited employee actually clicks the link.
+**Verified 2026-08-07: still valid.**
 
-**Recommended fix:** add `FRONTEND_BASE_URL` to `AGENTS.md`'s deploy pre-push checklist, and/or
-remove the `localhost` default in production builds so a missing value fails loudly (e.g. `Config`
-validation error) rather than silently producing broken links — mirroring how `DatabaseURL` is
-already required with no silent fallback in `config.Load()`.
+## - [ ] 4. `FRONTEND_BASE_URL` defaults to `localhost`, breaking invite emails in production
 
-**Not blocking** — purely an operational/deploy-config concern, unrelated to any frontend
-implementation work in `complete-epic-8.md`.
+`backend/internal/config/config.go:33` defaults `FrontendBaseURL` to `http://localhost:3000` with
+no required-value validation (unlike `DatabaseURL`, `config.go:52-54`). Used in
+`internal/service/invite.go:87` to build the signup link embedded in every invitation email
+(`internal/email/email.go:28-52` — confirmed there is **no separate hardcoded-localhost bug** in
+the email template itself; it's entirely this one config default flowing through). `AGENTS.md`'s
+deploy checklist doesn't mention this variable. If forgotten in production (Render), every invite
+email links to a broken `localhost` URL — silent until an invited employee clicks it. (Merges what
+was a duplicate bullet buried in the old "manage company form" mega-issue — same root cause.)
 
-Found 2026-08-05, same verification pass as above.
+**Fix:** add `FRONTEND_BASE_URL` to `AGENTS.md`'s deploy checklist, and make it a required config
+value (fail loudly at startup) rather than silently defaulting in non-dev environments.
 
-## - [ ] `GET /api/users/me` leaks the employee's bcrypt PIN hash and lockout fields
+**Verified 2026-08-07: still valid.**
 
-`handleUserMe` in `backend/internal/server/routes.go` (lines 17-41) returns the raw `db.User`
-struct (`c.JSON(http.StatusOK, gin.H{"data": user})`). `db.User.PinHash` is tagged
-`json:"pin_hash"` with no redaction, so every response from this endpoint includes the employee's
-bcrypt PIN hash in plaintext JSON, along with `failed_login_attempts`, `locked_until`, and
-`user_ip_at_consent`.
+## - [ ] 5. Account/OTP lockout has no IP or device throttling — enables targeted DOS
 
-Same root cause as the `GET /api/admin/me` leak fixed just below (and the same class of bug the
-`AdminLogin`/`sanitizeAdmin` fix addressed on the admin side) — but never applied to the
-employee-facing equivalent. `internal/handler/auth.go` already has a `sanitizeUser()` helper
-(lines 800-815, used by `Login`/`CreatePin`/`VerifyEmailOTP`) that returns an explicit allowlist
-(id/email/email_verified/full_name/phone_number/phone_verified/status/is_terms_accepted/
-terms_accepted_at/terms_version/created_at/updated_at) excluding `pin_hash` and the lockout
-fields — `handleUserMe` should use it (or an equivalent) instead of serializing the raw struct.
+PIN login (`internal/handler/auth.go:184-210`): 3 failed attempts → 1hr lock, 6 → permanent
+`UserStatusLocked` — per-account only. OTP failures (`checkEmailOTPBlocked`, `auth.go:434-455`) via
+`email_otp_failures` table — same pattern, temporary then permanent block. **Both are keyed purely
+by email/account**, no IP or device fingerprint anywhere. Anyone who knows a victim's email/phone
+can lock them out — confirmed real, matching the user's original suspicion.
 
-Found 2026-08-05 while scoping the Epic 8 frontend plan's employee `use-user` hook, which calls
-this endpoint. Not fixed yet — logged here per instruction rather than fixed inline.
+**Needs design** — brainstorm before implementing (candidates: IP/device-based secondary
+throttling, CAPTCHA after N attempts, re-verification via email on suspicious device/location
+change). Flagged by the user as worth solving but not yet scoped.
 
-# Possible problems/questions to address
+**Verified 2026-08-07: confirmed valid DOS vector.**
 
-## [ ] account locked on multiple attempts may allow bad actors to intentionally block legitimate user accounts
+## - [ ] 6. No checks against self-invite or cross-company/cross-role email reuse
 
-In case a bad actor lays hands on user phone number, they may attempt otps multiple times to create a form of DOS for actual user.
-A possible fix could be to collect device info such as IP addr and browser id or mac addrr of user to block those in certain scenarios and the account itself on other scenarios. We could also use this to request for opt by email again in case device or location change looks fishy.
-Still random thoughts. yet to evaluate clearly and see if this is a valid problem or how best to address it.
+`internal/service/invite.go` `Invite()` (54-101) only checks for an existing *pending* invitation
+to the same email (`GetInvitationByEmail`, 67-71) — never checks the `users` or `admins` tables,
+never compares against the inviting admin's own email. `admins.email` and `users.email` are
+independently unique (`backend/migrations/000001_schema.up.sql:46,59`), so the same email can be
+an admin in one company and a user in another (or even the same company) simultaneously, and an
+admin can invite themself as an employee.
 
-# phone verification has no reconciler coverage. ListReconcilableAdvanceRequests
+**Needs a policy decision** (user's stated preference: should not be possible) before implementing
+the check — brainstorm exact rules (globally unique across `users`+`admins`? per-company only? can
+one person hold both an admin and employee role by design?).
 
-only queries advance_requests; a phone verification stuck in pending with a lost webhook has no
-automatic recovery path in this codebase today — it relies entirely on the webhook arriving.
-What are some ways to fix this? this is necessary.
+**Verified 2026-08-07: still valid, zero checks exist.**
+
+## - [ ] 7. Login never verifies the URL's company slug server-side
+
+`POST /login` (`server.go:99`) request struct only has `Email`/`PIN`
+(`auth.go:142-145`) — no slug field. Company is resolved *after* authentication purely from
+`user.CompanyID` (`auth.go:213`, comment: "email is globally unique") and returned as
+`company_slug` for the frontend to redirect with. The `{company}` slug in the URL today is a pure
+frontend routing artifact, never cross-checked against the authenticated user's actual company.
+
+**Fix:** have `Login()` accept/require the slug from the request path and reject if it doesn't
+match the resolved user's company — closes the gap the user flagged ("verify company id or slug
+matches... before login").
+
+**Verified 2026-08-07: still valid.**
+
+## - [ ] 8. Phone verification has no reconciler coverage
+
+Phone verification is genuinely async/webhook-based (Campay USSD push), not synchronous OTP:
+`AddPhoneNumber` (`internal/handler/phone.go:43-187`) creates a `phone_verifications` row
+(`status='initiated'` → `'pending'`, storing `campay_payout_ref`), resolved only by
+`handlePhoneVerificationWebhook` (`internal/handler/advance.go:743-786`). The
+`phone_verifications` table (`migrations/000001_schema.up.sql:174-190`) has **no**
+`attempt_count`/`next_retry_at`/`last_reconciled_at`/`needs_admin_review` columns, unlike
+`advance_requests`. `ListReconcilableAdvanceRequests` (`db/queries/advance_requests.sql:52-70`)
+and the reconciler (`internal/reconciler/reconciler.go`) touch only `advance_requests` — zero
+references to `phone_verifications` anywhere in the reconciler. A lost webhook leaves a row stuck
+in `pending` forever; `GetActivePhoneVerificationByUser` then blocks the user from retrying with a
+409 (`phone.go:80-84`). No resend/cancel/timeout path exists at all.
+
+**Fix:** extend the reconciler pattern to `phone_verifications` — needs schema columns
+(attempt/backoff tracking) mirroring `advance_requests`, plus a resend/cancel path so a stuck
+verification doesn't permanently lock the user out.
+
+**Verified 2026-08-07: still valid** (dedicated investigation, confirmed webhook-only with no
+fallback).
+
+## - [ ] 9. Some 500 responses don't log the underlying error (rescoped from "no debug logs")
+
+**Rescoped — the premise of "no logging at all" is stale.** Structured logging already exists:
+`middleware.Logger()` (`internal/middleware/middleware.go:10-26`) logs every request via
+`slog.Info` (method/path/status/latency/ip), wired in `server.go:76-78` alongside
+`gin.Recovery()` and `RequestID()`. 59 `slog.Error`/`slog.Warn` call sites exist across handlers.
+**What's actually still true:** many `JSONError(..., http.StatusInternalServerError, ...)` sites
+have no adjacent `slog.Error` logging the real Go `err` (e.g. `auth.go:215,229,278,288,303,323`),
+so some 500s only ever surface the generic client-facing message on stdout — the exact frustration
+the user described, just narrower in scope than "no logs exist."
+
+**Fix:** audit every `JSONError(c, http.StatusInternalServerError, ...)` call site across
+`internal/handler/*.go` and ensure each logs the underlying error via `slog.Error` before
+responding.
+
+**Verified 2026-08-07: partially valid, rescoped to the actual gap.**
+
+## - [ ] 10. "platform" isn't reserved as a company slug; no slug-existence check before login renders
+
+`slugPattern` (`internal/handler/platform.go:19`, mirrored in
+`bohikor/src/app/platform/(protected)/page.tsx:41`) is a character-format regex only — no reserved-
+word blocklist, so a company could be created with slug `platform` and collide with the static
+`/platform` route. Separately, `bohikor/src/app/[company]/login/page.tsx` renders the login form
+for **any** `[company]` value with no existence check first — `GetCompanyBySlug` exists only as a
+sqlc query (`db/sqlc/companies.sql.go:65`) used by the `create-admin` CLI, never exposed over HTTP.
+
+**Scope decision (user confirmed): minimal fix only, no `/org/{slug}` route restructure.**
+- Backend: expose a public `GET /api/companies/by-slug/:slug`, and blocklist reserved words
+  (`platform`, and any other top-level route segments) on company creation.
+- Frontend: `[company]/login` calls the new endpoint first and shows a "company not found" state
+  instead of a login form when the slug doesn't resolve.
+
+**Verified 2026-08-07: still valid**, scope narrowed per user decision.
+
+## - [ ] 11. Manage-company UI is missing admin visibility, copy-link affordances, and nav reorg
+
+`CompanyDetail` (`bohikor/src/app/platform/(protected)/page.tsx:43-345`) is already a Radix
+`Dialog` with a working double-confirm pattern for suspend (lines 219-243) — directly reusable for
+admin-credential actions. What's missing, confirmed absent:
+- No list of a company's existing admins (no GET-admins endpoint/hook exists — `use-companies.ts`
+  only has a POST-admin mutation).
+- No copy-link affordance for the company URL or admin creds.
+- Reconciliation health/needs-review are not on their own nav page.
+- No self-service admin password-reset entry point (see issue 12).
+
+**Needs design** before implementation — this is a bundle, not a single fix; brainstorm the exact
+UI shape (dock modal vs. keep as dialog, where copy-link lives, nav structure) before coding.
+
+**Verified 2026-08-07: still valid, confirmed via UI inspection.**
+
+## - [ ] 12. Company admins have no self-service password reset
+
+Grep for `change-password`/`reset-password`/`changePassword`/`resetPassword` across
+`bohikor/src` and `backend/internal` returns nothing. The only password-adjacent capability is
+platform-admin-initiated "Create Admin" (sets an initial password). Employees have a PIN
+reset flow (`forgot-pin`/`reset-pin`) but that's a different flow/subject entirely. Company admins
+have no old-password/new-password/confirm flow anywhere.
+
+**Fix:** add a company-admin password-change endpoint (old password + new password + confirm) and
+a nav entry to reach it — likely paired with issue 11's nav work.
+
+**Verified 2026-08-07: still valid, confirmed missing.**
+
+## - [ ] 13. Inline error messages are easy to miss (rescoped from "user-facing errors not up to par")
+
+**Rescoped — the plumbing already exists and is more solid than the original issue assumed.**
+Sonner toasts + inline `<Alert variant="destructive">` + per-endpoint error-code mapping (e.g.
+`invalid_credentials`, `account_suspended`, `company_suspended`) are already wired consistently
+across every login/invite form checked (`[company]/login/page.tsx:39-81`,
+`[company]/admin/login/page.tsx:39-60`, `platform/login/page.tsx:38-59`,
+`[company]/admin/(protected)/invite/page.tsx:28-55`). A shared `getApiErrorMessage()` helper
+exists (`bohikor/src/lib/api.ts:108-115`) but isn't used everywhere — some pages inline their own
+extraction instead.
+
+**What's actually still true, per user's own example:** a wrong PIN on login renders its error
+above the email field in a style that's easy to miss — a *visual prominence/placement* problem,
+not a missing-plumbing problem. Design and payout-failure visibility (does a failed payout clearly
+surface as an error to the employee, not just silently sit in a status field?) both need a look
+before deciding the fix — brainstorm the exact prominence/placement change (position relative to
+the field that caused it, color/weight, whether critical failures like payout warrant something
+stronger than a toast) rather than jumping straight to implementation.
+
+**Verified 2026-08-07: infrastructure is solid; rescoped to prominence/placement + consistency.**
+
+# Resolved — verified against current code, not carried into the execution queue
+
+## - [x] `event.preventDefault()` on forms
+
+Checked `[company]/login`, `[company]/admin/login`, `platform/login`, and the invite form — all
+four call `e.preventDefault()` as the first line of their submit handler
+(`login/page.tsx:40`, `admin/login/page.tsx:40`, `platform/login/page.tsx:39`,
+`invite/page.tsx:29`). No full-page-reload-on-failed-submit reproduced anywhere checked.
+
+**Verified 2026-08-07: resolved / not reproduced.** Re-open with a specific repro if one turns up.
+
+# Possible problems/questions carried forward without a validity check yet
+
+(none remaining — all 8 original items above were evaluated and folded into the numbered list or
+closed.)
