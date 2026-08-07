@@ -49,6 +49,7 @@ func (h *PhoneHandler) AddPhoneNumber(c *gin.Context) {
 	}
 	userID, ok := val.(uuid.UUID)
 	if !ok {
+		slog.Error("invalid user_id type in context", "value", val)
 		JSONError(c, http.StatusInternalServerError, "internal_error", "invalid user ID")
 		return
 	}
@@ -195,6 +196,7 @@ func (h *PhoneHandler) GetPhoneVerificationStatus(c *gin.Context) {
 	}
 	userID, ok := val.(uuid.UUID)
 	if !ok {
+		slog.Error("invalid user_id type in context", "value", val)
 		JSONError(c, http.StatusInternalServerError, "internal_error", "invalid user ID")
 		return
 	}

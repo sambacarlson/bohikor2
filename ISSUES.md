@@ -181,7 +181,7 @@ this issue's gap. Fixed by age-bounding that query to 60s, which is both simpler
 waiting on `needs_admin_review` (~23min backoff ladder) and finally makes the frontend's existing
 retry affordance actually work. No frontend changes needed.
 
-## - [ ] 9. Some 500 responses don't log the underlying error (rescoped from "no debug logs")
+## - [x] 9. Some 500 responses don't log the underlying error (rescoped from "no debug logs")
 
 **Rescoped — the premise of "no logging at all" is stale.** Structured logging already exists:
 `middleware.Logger()` (`internal/middleware/middleware.go:10-26`) logs every request via
@@ -197,6 +197,15 @@ the user described, just narrower in scope than "no logs exist."
 responding.
 
 **Verified 2026-08-07: partially valid, rescoped to the actual gap.**
+
+**Resolved 2026-08-07 (#28):** audited all 76 `JSONError(..., http.StatusInternalServerError, ...)`
+call sites across `internal/handler/*.go` with a script, then by hand. Added `slog.Error` (with the
+real `err` plus relevant IDs — user/admin/company id, email — for grep-ability) at the 41 sites that
+were genuinely silent, including 5 `user_id`-type-assertion invariant violations and the shared
+`companyIDFromContext` helper. The 3 remaining flagged sites (`advance.go:365`, `admin_requests.go:202`,
+`phone.go:168`) turned out already covered — `disburseAndResolve`/the collect-failure fallback log
+internally on every path that reaches them. Also converted one stray `fmt.Printf("WARN: ...")` in
+`auth.go` (post-signup `AcceptInvitation` failure) to `slog.Warn`, same class of bug.
 
 ## - [ ] 10. "platform" isn't reserved as a company slug; no slug-existence check before login renders
 

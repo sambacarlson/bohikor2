@@ -50,11 +50,13 @@ func HandleListEvents(q eventsQuerier) gin.HandlerFunc {
 func companyIDFromContext(c *gin.Context) (uuid.UUID, bool) {
 	val, exists := c.Get("company_id")
 	if !exists {
+		slog.Error("company_id missing from context")
 		JSONError(c, http.StatusInternalServerError, "internal_error", "missing company scope")
 		return uuid.UUID{}, false
 	}
 	companyID, ok := val.(uuid.UUID)
 	if !ok {
+		slog.Error("invalid company_id type in context", "value", val)
 		JSONError(c, http.StatusInternalServerError, "internal_error", "invalid company scope")
 		return uuid.UUID{}, false
 	}

@@ -225,6 +225,7 @@ func (h *PlatformHandler) CreateCompanyAdmin(c *gin.Context) {
 
 	hashed, err := h.hasher.Hash(req.Password)
 	if err != nil {
+		slog.Error("hash admin password", "error", err, "company_id", companyID)
 		JSONError(c, http.StatusInternalServerError, "hash_failed", "failed to hash password")
 		return
 	}

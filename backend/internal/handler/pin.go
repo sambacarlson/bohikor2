@@ -39,6 +39,7 @@ func (h *PinHandler) ChangePin(c *gin.Context) {
 	}
 	userID, ok := val.(uuid.UUID)
 	if !ok {
+		slog.Error("invalid user_id type in context", "value", val)
 		JSONError(c, http.StatusInternalServerError, "internal_error", "invalid user ID")
 		return
 	}
@@ -75,6 +76,7 @@ func (h *PinHandler) ChangePin(c *gin.Context) {
 
 	newPinHash, err := h.hasher.Hash(req.NewPIN)
 	if err != nil {
+		slog.Error("hash pin", "error", err, "user_id", userID)
 		JSONError(c, http.StatusInternalServerError, "hash_failed", "Failed to hash PIN")
 		return
 	}
@@ -84,6 +86,7 @@ func (h *PinHandler) ChangePin(c *gin.Context) {
 		PinHash: pgtype.Text{String: newPinHash, Valid: true},
 	})
 	if err != nil {
+		slog.Error("update pin hash", "error", err, "user_id", userID)
 		JSONError(c, http.StatusInternalServerError, "internal_error", "Failed to update PIN")
 		return
 	}
@@ -101,6 +104,7 @@ func (h *PinHandler) ResetPin(c *gin.Context) {
 	}
 	userID, ok := val.(uuid.UUID)
 	if !ok {
+		slog.Error("invalid user_id type in context", "value", val)
 		JSONError(c, http.StatusInternalServerError, "internal_error", "invalid user ID")
 		return
 	}
@@ -131,6 +135,7 @@ func (h *PinHandler) ResetPin(c *gin.Context) {
 
 	newPinHash, err := h.hasher.Hash(req.NewPIN)
 	if err != nil {
+		slog.Error("hash pin", "error", err, "user_id", userID)
 		JSONError(c, http.StatusInternalServerError, "hash_failed", "Failed to hash PIN")
 		return
 	}
@@ -140,6 +145,7 @@ func (h *PinHandler) ResetPin(c *gin.Context) {
 		PinHash: pgtype.Text{String: newPinHash, Valid: true},
 	})
 	if err != nil {
+		slog.Error("update pin hash", "error", err, "user_id", userID)
 		JSONError(c, http.StatusInternalServerError, "internal_error", "Failed to update PIN")
 		return
 	}

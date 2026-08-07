@@ -212,6 +212,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	// Resolve the company (email is globally unique) for redirect + status gate.
 	company, err := h.queries.GetCompanyByID(c.Request.Context(), user.CompanyID)
 	if err != nil {
+		slog.Error("resolve company", "error", err, "user_id", user.ID)
 		JSONError(c, http.StatusInternalServerError, "internal_error", "Failed to resolve company")
 		return
 	}
@@ -234,6 +235,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 
 	tokens, err := h.generateTokenPair(user.ID.String(), "user", user.CompanyID.String())
 	if err != nil {
+		slog.Error("generate token pair", "error", err, "user_id", user.ID)
 		JSONError(c, http.StatusInternalServerError, "token_failed", "Failed to generate tokens")
 		return
 	}
@@ -283,6 +285,7 @@ func (h *AuthHandler) CreatePin(c *gin.Context) {
 
 	company, err := h.queries.GetCompanyByID(c.Request.Context(), invitation.CompanyID)
 	if err != nil {
+		slog.Error("resolve company", "error", err, "company_id", invitation.CompanyID)
 		JSONError(c, http.StatusInternalServerError, "internal_error", "Failed to resolve company")
 		return
 	}
@@ -293,6 +296,7 @@ func (h *AuthHandler) CreatePin(c *gin.Context) {
 
 	pinHash, err := h.hasher.Hash(req.PIN)
 	if err != nil {
+		slog.Error("hash pin", "error", err)
 		JSONError(c, http.StatusInternalServerError, "hash_failed", "Failed to hash PIN")
 		return
 	}
@@ -308,12 +312,13 @@ func (h *AuthHandler) CreatePin(c *gin.Context) {
 		PinHash:       pgtype.Text{String: pinHash, Valid: true},
 	})
 	if err != nil {
+		slog.Error("create user", "error", err, "email", req.Email)
 		JSONError(c, http.StatusInternalServerError, "create_user_failed", "Failed to create user")
 		return
 	}
 
 	if _, err := h.queries.AcceptInvitation(c.Request.Context(), req.Email); err != nil {
-		fmt.Printf("WARN: failed to accept invitation for %s: %v\n", req.Email, err)
+		slog.Warn("accept invitation after signup", "error", err, "email", req.Email)
 	}
 
 	metadata, _ := json.Marshal(map[string]string{"source": "mobile"})
@@ -328,6 +333,7 @@ func (h *AuthHandler) CreatePin(c *gin.Context) {
 
 	tokens, err := h.generateTokenPair(user.ID.String(), "user", user.CompanyID.String())
 	if err != nil {
+		slog.Error("generate token pair", "error", err, "user_id", user.ID)
 		JSONError(c, http.StatusInternalServerError, "token_failed", "Failed to generate tokens")
 		return
 	}
@@ -368,6 +374,7 @@ func (h *AuthHandler) ForgotPin(c *gin.Context) {
 
 	code, err := generateOTP()
 	if err != nil {
+		slog.Error("generate otp", "error", err, "email", req.Email)
 		JSONError(c, http.StatusInternalServerError, "otp_generation_failed", "Failed to generate OTP")
 		return
 	}
@@ -379,11 +386,13 @@ func (h *AuthHandler) ForgotPin(c *gin.Context) {
 		ExpiresAt: expiresAt,
 	})
 	if err != nil {
+		slog.Error("store otp", "error", err, "email", req.Email)
 		JSONError(c, http.StatusInternalServerError, "store_otp_failed", "Failed to store OTP")
 		return
 	}
 
 	if err := h.emailClient.SendOTP(c.Request.Context(), req.Email, code); err != nil {
+		slog.Error("send otp email", "error", err, "email", req.Email)
 		JSONError(c, http.StatusInternalServerError, "send_otp_failed", "Failed to send OTP email")
 		return
 	}
@@ -416,6 +425,7 @@ func (h *AuthHandler) SendEmailOTP(c *gin.Context) {
 
 	code, err := generateOTP()
 	if err != nil {
+		slog.Error("generate otp", "error", err, "email", req.Email)
 		JSONError(c, http.StatusInternalServerError, "otp_generation_failed", "Failed to generate OTP")
 		return
 	}
@@ -427,11 +437,13 @@ func (h *AuthHandler) SendEmailOTP(c *gin.Context) {
 		ExpiresAt: expiresAt,
 	})
 	if err != nil {
+		slog.Error("store otp", "error", err, "email", req.Email)
 		JSONError(c, http.StatusInternalServerError, "store_otp_failed", "Failed to store OTP")
 		return
 	}
 
 	if err := h.emailClient.SendOTP(c.Request.Context(), req.Email, code); err != nil {
+		slog.Error("send otp email", "error", err, "email", req.Email)
 		JSONError(c, http.StatusInternalServerError, "send_otp_failed", "Failed to send OTP email")
 		return
 	}
@@ -497,6 +509,7 @@ func (h *AuthHandler) VerifyEmailOTP(c *gin.Context) {
 	h.resetOTPFailures(c, req.Email)
 
 	if err := h.queries.DeleteEmailOTP(c.Request.Context(), req.Email); err != nil {
+		slog.Error("delete email otp", "error", err, "email", req.Email)
 		JSONError(c, http.StatusInternalServerError, "cleanup_failed", "Failed to cleanup OTP")
 		return
 	}
@@ -515,6 +528,7 @@ func (h *AuthHandler) VerifyEmailOTP(c *gin.Context) {
 
 		company, err := h.queries.GetCompanyByID(c.Request.Context(), user.CompanyID)
 		if err != nil {
+			slog.Error("resolve company", "error", err, "user_id", user.ID)
 			JSONError(c, http.StatusInternalServerError, "internal_error", "Failed to resolve company")
 			return
 		}
@@ -525,6 +539,7 @@ func (h *AuthHandler) VerifyEmailOTP(c *gin.Context) {
 
 		tokens, err := h.generateTokenPair(user.ID.String(), "user", user.CompanyID.String())
 		if err != nil {
+			slog.Error("generate token pair", "error", err, "user_id", user.ID)
 			JSONError(c, http.StatusInternalServerError, "token_failed", "Failed to generate tokens")
 			return
 		}
@@ -541,6 +556,7 @@ func (h *AuthHandler) VerifyEmailOTP(c *gin.Context) {
 	}
 
 	if _, err := h.queries.AcceptInvitation(c.Request.Context(), req.Email); err != nil {
+		slog.Error("accept invitation", "error", err, "email", req.Email)
 		JSONError(c, http.StatusInternalServerError, "accept_invitation_failed", "Failed to accept invitation")
 		return
 	}
@@ -647,6 +663,7 @@ func (h *AuthHandler) AdminLogin(c *gin.Context) {
 
 	company, err := h.queries.GetCompanyByID(c.Request.Context(), admin.CompanyID)
 	if err != nil {
+		slog.Error("resolve company", "error", err, "admin_id", admin.ID)
 		JSONError(c, http.StatusInternalServerError, "internal_error", "Failed to resolve company")
 		return
 	}
@@ -663,6 +680,7 @@ func (h *AuthHandler) AdminLogin(c *gin.Context) {
 
 	tokens, err := h.generateTokenPair(admin.ID.String(), "admin", admin.CompanyID.String())
 	if err != nil {
+		slog.Error("generate token pair", "error", err, "admin_id", admin.ID)
 		JSONError(c, http.StatusInternalServerError, "token_failed", "Failed to generate tokens")
 		return
 	}
@@ -698,6 +716,7 @@ func (h *AuthHandler) PlatformLogin(c *gin.Context) {
 	// Platform admins have no company; company_id claim is empty.
 	tokens, err := h.generateTokenPair(pa.ID.String(), "platform_admin", "")
 	if err != nil {
+		slog.Error("generate token pair", "error", err, "platform_admin_id", pa.ID)
 		JSONError(c, http.StatusInternalServerError, "token_failed", "Failed to generate tokens")
 		return
 	}
@@ -740,6 +759,7 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 
 	tokens, err := h.generateTokenPair(stored.SubjectID.String(), stored.SubjectType, companyID)
 	if err != nil {
+		slog.Error("generate token pair", "error", err, "subject_id", stored.SubjectID)
 		JSONError(c, http.StatusInternalServerError, "token_failed", "Failed to generate tokens")
 		return
 	}

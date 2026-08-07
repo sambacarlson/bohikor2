@@ -120,6 +120,7 @@ func HandleUpdateSettings(q settingsQuerier) gin.HandlerFunc {
 		}
 		adminID, err := uuid.Parse(adminIDStr)
 		if err != nil {
+			slog.Error("parse admin_id from context", "error", err, "admin_id", adminIDStr)
 			JSONError(c, http.StatusInternalServerError, "internal_error", "invalid admin ID")
 			return
 		}

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"strconv"
 
@@ -44,6 +45,7 @@ func HandleListUsers(q usersQuerier) gin.HandlerFunc {
 			Offset:    int32((page - 1) * perPage),
 		})
 		if err != nil {
+			slog.Error("list users", "error", err, "company_id", companyID)
 			JSONError(c, http.StatusInternalServerError, "internal_error", "failed to list users")
 			return
 		}
@@ -83,6 +85,7 @@ func HandleUnlockUser(q usersQuerier) gin.HandlerFunc {
 		}
 
 		if err := q.ResetEmailOTPFailures(c.Request.Context(), user.Email); err != nil {
+			slog.Error("reset email otp failures", "error", err, "user_id", user.ID)
 			JSONError(c, http.StatusInternalServerError, "internal_error", "failed to reset OTP failures")
 			return
 		}

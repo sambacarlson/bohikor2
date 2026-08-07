@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -42,6 +43,7 @@ func HandleInvite(q InviteQuerier) gin.HandlerFunc {
 				JSONError(c, http.StatusConflict, "email_already_registered", err.Error())
 				return
 			}
+			slog.Error("invite", "error", err, "email", req.Email, "admin_id", adminID)
 			JSONError(c, http.StatusInternalServerError, "internal_error", err.Error())
 			return
 		}
