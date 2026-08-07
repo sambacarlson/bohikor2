@@ -3,7 +3,7 @@
 Ordered by priority for execution. Each item was re-verified 2026-08-07 against current code
 (agents cited file:line) before being carried forward — see each entry's "Verified" line.
 
-## - [ ] 1. `GET /api/users/me` leaks the employee's bcrypt PIN hash and lockout fields
+## - [x] 1. `GET /api/users/me` leaks the employee's bcrypt PIN hash and lockout fields
 
 `handleUserMe` (`backend/internal/server/routes.go:17-41`) returns the raw `db.User` struct via
 `c.JSON(http.StatusOK, gin.H{"data": user})`. `db.User.PinHash` (`db/sqlc/models.go:325`) has no
@@ -15,6 +15,9 @@ from `routes.go`.
 **Fix:** route `handleUserMe` through `sanitizeUser()` (or equivalent) instead of the raw struct.
 
 **Verified 2026-08-07: still valid**, confirmed at the cited lines.
+
+**Resolved 2026-08-07 (#19):** exported `sanitizeUser()` as `handler.SanitizeUser` and routed
+`handleUserMe` through it; regression test asserts the leaked fields never appear in the response.
 
 ## - [ ] 2. `sql.NullTime` fields serialize as `{Time, Valid}` objects, not plain nullable strings
 
