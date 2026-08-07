@@ -10,9 +10,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
 
 	db "github.com/Iknite-Space/bohikor2/db/sqlc"
+	"github.com/Iknite-Space/bohikor2/internal/dbtypes"
 )
 
 // mockPlatformStore records provisioning calls and lets tests assert behaviour.
@@ -25,7 +25,7 @@ type mockPlatformStore struct {
 	createAdminArg   *db.CreateAdminParams
 	createAdminErr   error
 	ledgerArg        *db.CreateLedgerEntryParams
-	balance          pgtype.Numeric
+	balance          dbtypes.NumericString
 	createCompanyErr error
 	listErr          error
 	balanceErr       error
@@ -98,7 +98,7 @@ func (m *mockPlatformStore) CreateLedgerEntry(ctx context.Context, arg db.Create
 	return db.CompanyLedger{ID: uuid.New(), CompanyID: arg.CompanyID, EntryType: arg.EntryType, AmountXaf: arg.AmountXaf}, nil
 }
 
-func (m *mockPlatformStore) GetCompanyBalance(ctx context.Context, companyID uuid.UUID) (pgtype.Numeric, error) {
+func (m *mockPlatformStore) GetCompanyBalance(ctx context.Context, companyID uuid.UUID) (dbtypes.NumericString, error) {
 	return m.balance, m.balanceErr
 }
 

@@ -43,7 +43,7 @@ fixed a live bug this uncovered: `GET /api/admin/users`' `locked_until` had been
 `Invalid Date` since the frontend `AdminUser` type already (incorrectly, until now) assumed the
 correct shape.
 
-## - [ ] 3. `amount_xaf` fields serialize as JSON numbers but are typed `string` in the frontend
+## - [x] 3. `amount_xaf` fields serialize as JSON numbers but are typed `string` in the frontend
 
 `AdvanceRequest.AmountXaf`, `LedgerEntry.AmountXaf` (`db/sqlc/models.go:205,233,284`) are
 `pgtype.Numeric`, returned raw (not through `numericToString()`, which only `balance_xaf` uses —
@@ -56,6 +56,16 @@ JSX interpolation coerces either type to the same displayed text.
 `numericToString()` for `balance_xaf`.
 
 **Verified 2026-08-07: still valid.**
+
+**Resolved 2026-08-07 (#23):** the only NUMERIC columns in the entire schema are the three
+`amount_xaf` columns (confirmed by grepping the migration), so rather than patching every handler,
+overrode `db/sqlc.yaml`'s `numeric` mapping globally to a new `dbtypes.NumericString` wrapper
+(`backend/internal/dbtypes/numeric_string.go`) that marshals as a JSON string (`null` when
+invalid) and otherwise behaves exactly like `pgtype.Numeric` (Scan/Value promoted via embedding).
+Also discovered the sqlc.yaml `db_type: "numeric"` override had never actually matched (needed the
+fully-qualified `pg_catalog.numeric`), so the project's stated `numeric` → `decimal.Decimal`
+mapping had silently never applied to anything — unrelated dead config, now replaced. Frontend
+needed no changes; `amount_xaf` was already typed `string` there.
 
 ## - [ ] 4. `FRONTEND_BASE_URL` defaults to `localhost`, breaking invite emails in production
 

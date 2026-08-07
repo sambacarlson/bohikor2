@@ -8,6 +8,7 @@ package db
 import (
 	"context"
 
+	"github.com/Iknite-Space/bohikor2/internal/dbtypes"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -18,11 +19,11 @@ VALUES ($1, $2, $3, $4, $5) RETURNING id, company_id, user_id, phone_number, amo
 `
 
 type CreatePhoneVerificationParams struct {
-	CompanyID   uuid.UUID      `json:"company_id"`
-	UserID      uuid.UUID      `json:"user_id"`
-	PhoneNumber string         `json:"phone_number"`
-	AmountXaf   pgtype.Numeric `json:"amount_xaf"`
-	Status      RequestStatus  `json:"status"`
+	CompanyID   uuid.UUID             `json:"company_id"`
+	UserID      uuid.UUID             `json:"user_id"`
+	PhoneNumber string                `json:"phone_number"`
+	AmountXaf   dbtypes.NumericString `json:"amount_xaf"`
+	Status      RequestStatus         `json:"status"`
 }
 
 func (q *Queries) CreatePhoneVerification(ctx context.Context, arg CreatePhoneVerificationParams) (PhoneVerification, error) {

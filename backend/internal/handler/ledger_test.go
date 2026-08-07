@@ -8,24 +8,24 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
 
 	db "github.com/Iknite-Space/bohikor2/db/sqlc"
+	"github.com/Iknite-Space/bohikor2/internal/dbtypes"
 )
 
 var errTestLedger = errors.New("ledger boom")
 
 type mockLedgerQuerier struct {
-	balance    pgtype.Numeric
+	balance    dbtypes.NumericString
 	balanceErr error
 	entries    []db.CompanyLedger
 	entriesErr error
 	lastArg    db.ListLedgerByCompanyParams
 }
 
-func (m *mockLedgerQuerier) GetCompanyBalance(ctx context.Context, companyID uuid.UUID) (pgtype.Numeric, error) {
+func (m *mockLedgerQuerier) GetCompanyBalance(ctx context.Context, companyID uuid.UUID) (dbtypes.NumericString, error) {
 	if m.balanceErr != nil {
-		return pgtype.Numeric{}, m.balanceErr
+		return dbtypes.NumericString{}, m.balanceErr
 	}
 	return m.balance, nil
 }
@@ -39,7 +39,7 @@ func (m *mockLedgerQuerier) ListLedgerByCompany(ctx context.Context, arg db.List
 }
 
 func TestHandleGetLedger_Success(t *testing.T) {
-	var bal pgtype.Numeric
+	var bal dbtypes.NumericString
 	_ = bal.Scan("15000.00")
 
 	q := &mockLedgerQuerier{
@@ -70,7 +70,7 @@ func TestHandleGetLedger_Success(t *testing.T) {
 }
 
 func TestHandleGetLedger_RespectsPaginationParams(t *testing.T) {
-	var bal pgtype.Numeric
+	var bal dbtypes.NumericString
 	_ = bal.Scan("0")
 	q := &mockLedgerQuerier{balance: bal}
 	r := makeTestGin()
@@ -92,7 +92,7 @@ func TestHandleGetLedger_RespectsPaginationParams(t *testing.T) {
 }
 
 func TestHandleGetLedger_ClampsOversizedPerPage(t *testing.T) {
-	var bal pgtype.Numeric
+	var bal dbtypes.NumericString
 	_ = bal.Scan("0")
 	q := &mockLedgerQuerier{balance: bal}
 	r := makeTestGin()
@@ -111,7 +111,7 @@ func TestHandleGetLedger_ClampsOversizedPerPage(t *testing.T) {
 }
 
 func TestHandleGetLedger_EmptyEntries(t *testing.T) {
-	var bal pgtype.Numeric
+	var bal dbtypes.NumericString
 	_ = bal.Scan("0")
 
 	q := &mockLedgerQuerier{balance: bal}
@@ -147,7 +147,7 @@ func TestHandleGetLedger_BalanceError(t *testing.T) {
 }
 
 func TestHandleGetLedger_ListError(t *testing.T) {
-	var bal pgtype.Numeric
+	var bal dbtypes.NumericString
 	_ = bal.Scan("0")
 	q := &mockLedgerQuerier{balance: bal, entriesErr: errTestLedger}
 	r := makeTestGin()

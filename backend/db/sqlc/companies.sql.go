@@ -9,6 +9,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/Iknite-Space/bohikor2/internal/dbtypes"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -118,14 +119,14 @@ ORDER BY c.created_at DESC
 `
 
 type ListCompaniesWithBalanceRow struct {
-	ID        uuid.UUID      `json:"id"`
-	Slug      string         `json:"slug"`
-	Name      string         `json:"name"`
-	Status    CompanyStatus  `json:"status"`
-	CreatedBy pgtype.UUID    `json:"created_by"`
-	CreatedAt time.Time      `json:"created_at"`
-	UpdatedAt time.Time      `json:"updated_at"`
-	Balance   pgtype.Numeric `json:"balance"`
+	ID        uuid.UUID             `json:"id"`
+	Slug      string                `json:"slug"`
+	Name      string                `json:"name"`
+	Status    CompanyStatus         `json:"status"`
+	CreatedBy pgtype.UUID           `json:"created_by"`
+	CreatedAt time.Time             `json:"created_at"`
+	UpdatedAt time.Time             `json:"updated_at"`
+	Balance   dbtypes.NumericString `json:"balance"`
 }
 
 func (q *Queries) ListCompaniesWithBalance(ctx context.Context) ([]ListCompaniesWithBalanceRow, error) {

@@ -17,6 +17,7 @@ import (
 
 	db "github.com/Iknite-Space/bohikor2/db/sqlc"
 	"github.com/Iknite-Space/bohikor2/internal/campay"
+	"github.com/Iknite-Space/bohikor2/internal/dbtypes"
 	"github.com/Iknite-Space/bohikor2/internal/service"
 )
 
@@ -37,7 +38,7 @@ type mockAdvanceQuerier struct {
 	countThisMonth       int64
 	countTodayErr        error
 	countMonthErr        error
-	balance              pgtype.Numeric
+	balance              dbtypes.NumericString
 	balanceErr           error
 	byID                 *db.AdvanceRequest
 	byIDErr              error
@@ -45,14 +46,14 @@ type mockAdvanceQuerier struct {
 	lastTransitionOpts   service.TransitionOpts
 }
 
-func (m *mockAdvanceQuerier) GetCompanyBalance(ctx context.Context, companyID uuid.UUID) (pgtype.Numeric, error) {
+func (m *mockAdvanceQuerier) GetCompanyBalance(ctx context.Context, companyID uuid.UUID) (dbtypes.NumericString, error) {
 	if m.balanceErr != nil {
-		return pgtype.Numeric{}, m.balanceErr
+		return dbtypes.NumericString{}, m.balanceErr
 	}
 	if m.balance.Valid {
 		return m.balance, nil
 	}
-	var big pgtype.Numeric
+	var big dbtypes.NumericString
 	_ = big.Scan("1000000000")
 	return big, nil
 }

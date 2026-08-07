@@ -16,6 +16,7 @@ import (
 
 	db "github.com/Iknite-Space/bohikor2/db/sqlc"
 	"github.com/Iknite-Space/bohikor2/internal/campay"
+	"github.com/Iknite-Space/bohikor2/internal/dbtypes"
 	"github.com/Iknite-Space/bohikor2/internal/service"
 )
 
@@ -23,7 +24,7 @@ type advanceQuerier interface {
 	GetUserByID(ctx context.Context, id uuid.UUID) (db.User, error)
 	GetActiveRequestByUserID(ctx context.Context, userID uuid.UUID) (db.AdvanceRequest, error)
 	GetAdvanceRequestByID(ctx context.Context, id uuid.UUID) (db.AdvanceRequest, error)
-	GetCompanyBalance(ctx context.Context, companyID uuid.UUID) (pgtype.Numeric, error)
+	GetCompanyBalance(ctx context.Context, companyID uuid.UUID) (dbtypes.NumericString, error)
 	CreateAdvanceRequestWithDebit(ctx context.Context, arg db.CreateAdvanceRequestParams) (db.AdvanceRequest, error)
 	Transition(ctx context.Context, req db.AdvanceRequest, newStatus db.RequestStatus, opts service.TransitionOpts) (db.AdvanceRequest, error)
 	CreateEvent(ctx context.Context, arg db.CreateEventParams) (db.Event, error)
@@ -306,7 +307,7 @@ func (h *AdvanceHandler) processAdvanceRequest(c *gin.Context, userID uuid.UUID)
 		return
 	}
 
-	var amount pgtype.Numeric
+	var amount dbtypes.NumericString
 	if err := amount.Scan(ps.advanceAmount.String()); err != nil {
 		slog.Error("scan advance amount", "error", err)
 		JSONError(c, http.StatusInternalServerError, "internal_error", "failed to parse advance amount")
@@ -873,9 +874,9 @@ func itoa(n int) string {
 	return string(buf[i:])
 }
 
-// numericToDecimal converts a pgtype.Numeric to decimal.Decimal for arithmetic
-// and comparisons that pgtype.Numeric doesn't support directly.
-func numericToDecimal(n pgtype.Numeric) (decimal.Decimal, error) {
+// numericToDecimal converts a dbtypes.NumericString to decimal.Decimal for
+// arithmetic and comparisons the wire-safe wrapper doesn't support directly.
+func numericToDecimal(n dbtypes.NumericString) (decimal.Decimal, error) {
 	if !n.Valid {
 		return decimal.Zero, nil
 	}
@@ -891,14 +892,14 @@ func numericToDecimal(n pgtype.Numeric) (decimal.Decimal, error) {
 }
 
 // negateNumeric flips the sign of a positive advance amount into a ledger debit.
-func negateNumeric(n pgtype.Numeric) (pgtype.Numeric, error) {
+func negateNumeric(n dbtypes.NumericString) (dbtypes.NumericString, error) {
 	d, err := numericToDecimal(n)
 	if err != nil {
-		return pgtype.Numeric{}, err
+		return dbtypes.NumericString{}, err
 	}
-	var negated pgtype.Numeric
+	var negated dbtypes.NumericString
 	if err := negated.Scan(d.Neg().String()); err != nil {
-		return pgtype.Numeric{}, err
+		return dbtypes.NumericString{}, err
 	}
 	return negated, nil
 }

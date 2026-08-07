@@ -7,15 +7,15 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
 
 	db "github.com/Iknite-Space/bohikor2/db/sqlc"
+	"github.com/Iknite-Space/bohikor2/internal/dbtypes"
 )
 
 // ledgerQuerier is the data layer HandleGetLedger needs: a company's running
 // balance plus its ledger history, both already scoped by company_id.
 type ledgerQuerier interface {
-	GetCompanyBalance(ctx context.Context, companyID uuid.UUID) (pgtype.Numeric, error)
+	GetCompanyBalance(ctx context.Context, companyID uuid.UUID) (dbtypes.NumericString, error)
 	ListLedgerByCompany(ctx context.Context, arg db.ListLedgerByCompanyParams) ([]db.CompanyLedger, error)
 }
 

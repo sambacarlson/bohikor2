@@ -18,6 +18,7 @@ import (
 	db "github.com/Iknite-Space/bohikor2/db/sqlc"
 	"github.com/Iknite-Space/bohikor2/internal/campay"
 	"github.com/Iknite-Space/bohikor2/internal/database"
+	"github.com/Iknite-Space/bohikor2/internal/dbtypes"
 )
 
 var (
@@ -82,7 +83,7 @@ func seedRequest(t *testing.T, ctx context.Context, queries *db.Queries, status 
 	if err != nil {
 		t.Fatalf("seed user: %v", err)
 	}
-	var amount pgtype.Numeric
+	var amount dbtypes.NumericString
 	if err := amount.Scan("5000"); err != nil {
 		t.Fatalf("scan amount: %v", err)
 	}
@@ -261,7 +262,7 @@ func TestTick_NoRefProcessingRowWithNoNextRetryAt_IsSurfacedByQuery(t *testing.T
 	if err != nil {
 		t.Fatalf("seed user: %v", err)
 	}
-	var amount pgtype.Numeric
+	var amount dbtypes.NumericString
 	if err := amount.Scan("5000"); err != nil {
 		t.Fatalf("scan amount: %v", err)
 	}
@@ -336,7 +337,7 @@ func TestTick_RefdProcessingRowWithNoNextRetryAt_IsSurfacedByQuery(t *testing.T)
 	if err != nil {
 		t.Fatalf("seed user: %v", err)
 	}
-	var amount pgtype.Numeric
+	var amount dbtypes.NumericString
 	if err := amount.Scan("5000"); err != nil {
 		t.Fatalf("scan amount: %v", err)
 	}

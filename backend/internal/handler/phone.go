@@ -12,6 +12,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	db "github.com/Iknite-Space/bohikor2/db/sqlc"
+	"github.com/Iknite-Space/bohikor2/internal/dbtypes"
 )
 
 type PhoneHandler struct {
@@ -93,7 +94,7 @@ func (h *PhoneHandler) AddPhoneNumber(c *gin.Context) {
 		return
 	}
 
-	var amount pgtype.Numeric
+	var amount dbtypes.NumericString
 	if err := amount.Scan(h.verifAmt.String()); err != nil {
 		slog.Error("scan verification amount", "error", err)
 		JSONError(c, http.StatusInternalServerError, "internal_error", "failed to parse amount")

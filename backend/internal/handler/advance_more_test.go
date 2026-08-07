@@ -16,6 +16,7 @@ import (
 
 	db "github.com/Iknite-Space/bohikor2/db/sqlc"
 	"github.com/Iknite-Space/bohikor2/internal/campay"
+	"github.com/Iknite-Space/bohikor2/internal/dbtypes"
 )
 
 func eligibleUser(uid uuid.UUID) *db.User {
@@ -404,7 +405,7 @@ func TestCreateRequest_MonthlyLimitReached(t *testing.T) {
 
 func TestCreateRequest_InsufficientFloat_Returns403(t *testing.T) {
 	uid := uuid.New()
-	var lowBalance pgtype.Numeric
+	var lowBalance dbtypes.NumericString
 	if err := lowBalance.Scan("100"); err != nil {
 		t.Fatalf("scan balance: %v", err)
 	}
@@ -418,7 +419,7 @@ func TestCreateRequest_InsufficientFloat_Returns403(t *testing.T) {
 
 func TestGetEligibility_InsufficientFloatBlocks(t *testing.T) {
 	uid := uuid.New()
-	var lowBalance pgtype.Numeric
+	var lowBalance dbtypes.NumericString
 	if err := lowBalance.Scan("100"); err != nil {
 		t.Fatalf("scan balance: %v", err)
 	}
@@ -457,7 +458,7 @@ func TestCreateRequest_ParseCompanyBalanceError(t *testing.T) {
 	// downstream decimal.NewFromString("NaN") fails to parse it — this is the
 	// cheapest way to reach the "parse company balance" error branch, which is
 	// otherwise unreachable via a plain DB error (that's balanceErr, covered above).
-	unparseable := pgtype.Numeric{Valid: true, NaN: true}
+	unparseable := dbtypes.NumericString{Numeric: pgtype.Numeric{Valid: true, NaN: true}}
 	q := &mockAdvanceQuerier{user: eligibleUser(uid), balance: unparseable}
 	h := NewAdvanceHandler(q, &mockCampayTransferer{}, &mockAdvanceSettingsQuerier{}, time.UTC)
 	w := runCreateRequest(h, uid, `{}`)
@@ -467,7 +468,7 @@ func TestCreateRequest_ParseCompanyBalanceError(t *testing.T) {
 }
 
 func TestNumericToDecimal_InvalidReturnsZero(t *testing.T) {
-	d, err := numericToDecimal(pgtype.Numeric{Valid: false})
+	d, err := numericToDecimal(dbtypes.NumericString{Numeric: pgtype.Numeric{Valid: false}})
 	if err != nil {
 		t.Fatalf("expected no error for an invalid numeric, got %v", err)
 	}

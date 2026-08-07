@@ -24,7 +24,7 @@ sql:
               import: "github.com/jackc/pgx/v5/pgtype"
               type: "Timestamptz"
             nullable: true
-          - db_type: "numeric"
+          - db_type: "pg_catalog.numeric"
             go_type:
-              import: "github.com/shopspring/decimal"
-              type: "Decimal"
+              import: "github.com/Iknite-Space/bohikor2/internal/dbtypes"
+              type: "NumericString"

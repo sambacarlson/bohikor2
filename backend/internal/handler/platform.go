@@ -14,6 +14,7 @@ import (
 
 	db "github.com/Iknite-Space/bohikor2/db/sqlc"
 	"github.com/Iknite-Space/bohikor2/internal/authpassword"
+	"github.com/Iknite-Space/bohikor2/internal/dbtypes"
 )
 
 var slugPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
@@ -27,7 +28,7 @@ type platformStore interface {
 	UpdateCompanyStatus(ctx context.Context, arg db.UpdateCompanyStatusParams) (db.Company, error)
 	CreateAdmin(ctx context.Context, arg db.CreateAdminParams) (db.Admin, error)
 	CreateLedgerEntry(ctx context.Context, arg db.CreateLedgerEntryParams) (db.CompanyLedger, error)
-	GetCompanyBalance(ctx context.Context, companyID uuid.UUID) (pgtype.Numeric, error)
+	GetCompanyBalance(ctx context.Context, companyID uuid.UUID) (dbtypes.NumericString, error)
 	ListRequestsNeedingReview(ctx context.Context) ([]db.ListRequestsNeedingReviewAcrossCompaniesRow, error)
 	ListCompanyRequestHealth(ctx context.Context) ([]db.ListCompanyRequestHealthRow, error)
 }
@@ -94,7 +95,7 @@ func (s *RealPlatformStore) CreateLedgerEntry(ctx context.Context, arg db.Create
 	return s.queries.CreateLedgerEntry(ctx, arg)
 }
 
-func (s *RealPlatformStore) GetCompanyBalance(ctx context.Context, companyID uuid.UUID) (pgtype.Numeric, error) {
+func (s *RealPlatformStore) GetCompanyBalance(ctx context.Context, companyID uuid.UUID) (dbtypes.NumericString, error) {
 	return s.queries.GetCompanyBalance(ctx, companyID)
 }
 
@@ -106,8 +107,12 @@ func (s *RealPlatformStore) ListCompanyRequestHealth(ctx context.Context) ([]db.
 	return s.queries.ListCompanyRequestHealth(ctx)
 }
 
-// numericToString renders a pgtype.Numeric as a plain decimal string for JSON.
-func numericToString(n pgtype.Numeric) string {
+// numericToString renders a dbtypes.NumericString as a plain decimal string
+// for handlers still building responses as gin.H (numericToString is a no-op
+// today since NumericString already marshals as a string; kept as an
+// explicit call at every balance_xaf/amount_xaf-in-gin.H site for clarity
+// and so a future value type swap can't silently regress the wire shape).
+func numericToString(n dbtypes.NumericString) string {
 	v, err := n.Value()
 	if err != nil || v == nil {
 		return "0"
@@ -131,17 +136,17 @@ func parseCompanyID(c *gin.Context) (uuid.UUID, bool) {
 
 // balanceOrFail fetches a company's balance, writing the 500 response itself
 // on failure. Shared by every handler that returns a companyResponse.
-func (h *PlatformHandler) balanceOrFail(c *gin.Context, companyID uuid.UUID) (pgtype.Numeric, bool) {
+func (h *PlatformHandler) balanceOrFail(c *gin.Context, companyID uuid.UUID) (dbtypes.NumericString, bool) {
 	balance, err := h.store.GetCompanyBalance(c.Request.Context(), companyID)
 	if err != nil {
 		slog.Error("get company balance", "error", err, "company_id", companyID)
 		JSONError(c, http.StatusInternalServerError, "internal_error", "failed to read balance")
-		return pgtype.Numeric{}, false
+		return dbtypes.NumericString{}, false
 	}
 	return balance, true
 }
 
-func companyResponse(company db.Company, balance pgtype.Numeric) gin.H {
+func companyResponse(company db.Company, balance dbtypes.NumericString) gin.H {
 	return gin.H{
 		"id":          company.ID,
 		"slug":        company.Slug,
@@ -180,7 +185,7 @@ func (h *PlatformHandler) CreateCompany(c *gin.Context) {
 		return
 	}
 
-	JSONSuccess(c, http.StatusCreated, companyResponse(company, pgtype.Numeric{}))
+	JSONSuccess(c, http.StatusCreated, companyResponse(company, dbtypes.NumericString{}))
 }
 
 // CreateCompanyAdmin creates the company's first (or an additional) admin.
@@ -244,7 +249,7 @@ func (h *PlatformHandler) TopUpCompany(c *gin.Context) {
 		return
 	}
 
-	var amount pgtype.Numeric
+	var amount dbtypes.NumericString
 	if err := amount.Scan(req.AmountXaf); err != nil {
 		JSONError(c, http.StatusBadRequest, "invalid_amount", "amount_xaf must be a valid number")
 		return
@@ -306,7 +311,7 @@ func (h *PlatformHandler) AdjustCompanyLedger(c *gin.Context) {
 		return
 	}
 
-	var amount pgtype.Numeric
+	var amount dbtypes.NumericString
 	if err := amount.Scan(req.AmountXaf); err != nil {
 		JSONError(c, http.StatusBadRequest, "invalid_amount", "amount_xaf must be a valid number")
 		return
@@ -435,7 +440,7 @@ func platformAdminUUID(c *gin.Context) pgtype.UUID {
 }
 
 // isNonPositive reports whether a numeric amount is <= 0.
-func isNonPositive(n pgtype.Numeric) bool {
+func isNonPositive(n dbtypes.NumericString) bool {
 	if !n.Valid || n.NaN {
 		return true
 	}

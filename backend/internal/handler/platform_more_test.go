@@ -10,14 +10,14 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
 
 	db "github.com/Iknite-Space/bohikor2/db/sqlc"
+	"github.com/Iknite-Space/bohikor2/internal/dbtypes"
 )
 
-func numeric(t *testing.T, s string) pgtype.Numeric {
+func numeric(t *testing.T, s string) dbtypes.NumericString {
 	t.Helper()
-	var n pgtype.Numeric
+	var n dbtypes.NumericString
 	if err := n.Scan(s); err != nil {
 		t.Fatalf("scan numeric %q: %v", s, err)
 	}
@@ -324,7 +324,7 @@ func TestUpdateCompanyStatus_InvalidID(t *testing.T) {
 }
 
 func TestIsNonPositive(t *testing.T) {
-	var invalid pgtype.Numeric // zero value: !Valid
+	var invalid dbtypes.NumericString // zero value: !Valid
 	if !isNonPositive(invalid) {
 		t.Fatalf("invalid numeric must be non-positive")
 	}
@@ -339,7 +339,7 @@ func TestIsNonPositive(t *testing.T) {
 }
 
 func TestNumericToString_InvalidReturnsZero(t *testing.T) {
-	var invalid pgtype.Numeric
+	var invalid dbtypes.NumericString
 	if got := numericToString(invalid); got != "0" {
 		t.Fatalf("expected 0 for invalid numeric, got %q", got)
 	}

@@ -10,6 +10,7 @@ import (
 	"net/netip"
 	"time"
 
+	"github.com/Iknite-Space/bohikor2/internal/dbtypes"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -198,21 +199,21 @@ type Admin struct {
 }
 
 type AdvanceRequest struct {
-	ID                    uuid.UUID          `json:"id"`
-	CompanyID             uuid.UUID          `json:"company_id"`
-	UserID                uuid.UUID          `json:"user_id"`
-	AmountXaf             pgtype.Numeric     `json:"amount_xaf"`
-	Status                RequestStatus      `json:"status"`
-	CampayPayoutRef       pgtype.Text        `json:"campay_payout_ref"`
-	FailureReason         pgtype.Text        `json:"failure_reason"`
-	PayoutDurationSeconds pgtype.Int4        `json:"payout_duration_seconds"`
-	AttemptCount          int32              `json:"attempt_count"`
-	LastReconciledAt      pgtype.Timestamptz `json:"last_reconciled_at"`
-	NextRetryAt           pgtype.Timestamptz `json:"next_retry_at"`
-	NeedsAdminReview      bool               `json:"needs_admin_review"`
-	ReissuedFromID        pgtype.UUID        `json:"reissued_from_id"`
-	CreatedAt             time.Time          `json:"created_at"`
-	UpdatedAt             time.Time          `json:"updated_at"`
+	ID                    uuid.UUID             `json:"id"`
+	CompanyID             uuid.UUID             `json:"company_id"`
+	UserID                uuid.UUID             `json:"user_id"`
+	AmountXaf             dbtypes.NumericString `json:"amount_xaf"`
+	Status                RequestStatus         `json:"status"`
+	CampayPayoutRef       pgtype.Text           `json:"campay_payout_ref"`
+	FailureReason         pgtype.Text           `json:"failure_reason"`
+	PayoutDurationSeconds pgtype.Int4           `json:"payout_duration_seconds"`
+	AttemptCount          int32                 `json:"attempt_count"`
+	LastReconciledAt      pgtype.Timestamptz    `json:"last_reconciled_at"`
+	NextRetryAt           pgtype.Timestamptz    `json:"next_retry_at"`
+	NeedsAdminReview      bool                  `json:"needs_admin_review"`
+	ReissuedFromID        pgtype.UUID           `json:"reissued_from_id"`
+	CreatedAt             time.Time             `json:"created_at"`
+	UpdatedAt             time.Time             `json:"updated_at"`
 }
 
 type Company struct {
@@ -226,14 +227,14 @@ type Company struct {
 }
 
 type CompanyLedger struct {
-	ID               uuid.UUID      `json:"id"`
-	CompanyID        uuid.UUID      `json:"company_id"`
-	EntryType        string         `json:"entry_type"`
-	AmountXaf        pgtype.Numeric `json:"amount_xaf"`
-	AdvanceRequestID pgtype.UUID    `json:"advance_request_id"`
-	CreatedBy        pgtype.UUID    `json:"created_by"`
-	Note             pgtype.Text    `json:"note"`
-	CreatedAt        time.Time      `json:"created_at"`
+	ID               uuid.UUID             `json:"id"`
+	CompanyID        uuid.UUID             `json:"company_id"`
+	EntryType        string                `json:"entry_type"`
+	AmountXaf        dbtypes.NumericString `json:"amount_xaf"`
+	AdvanceRequestID pgtype.UUID           `json:"advance_request_id"`
+	CreatedBy        pgtype.UUID           `json:"created_by"`
+	Note             pgtype.Text           `json:"note"`
+	CreatedAt        time.Time             `json:"created_at"`
 }
 
 type EmailOtp struct {
@@ -276,17 +277,17 @@ type Invitation struct {
 }
 
 type PhoneVerification struct {
-	ID              uuid.UUID      `json:"id"`
-	CompanyID       uuid.UUID      `json:"company_id"`
-	UserID          uuid.UUID      `json:"user_id"`
-	PhoneNumber     string         `json:"phone_number"`
-	AmountXaf       pgtype.Numeric `json:"amount_xaf"`
-	CampayPayoutRef pgtype.Text    `json:"campay_payout_ref"`
-	Status          RequestStatus  `json:"status"`
-	FailureReason   pgtype.Text    `json:"failure_reason"`
-	UssdCode        pgtype.Text    `json:"ussd_code"`
-	CreatedAt       time.Time      `json:"created_at"`
-	UpdatedAt       time.Time      `json:"updated_at"`
+	ID              uuid.UUID             `json:"id"`
+	CompanyID       uuid.UUID             `json:"company_id"`
+	UserID          uuid.UUID             `json:"user_id"`
+	PhoneNumber     string                `json:"phone_number"`
+	AmountXaf       dbtypes.NumericString `json:"amount_xaf"`
+	CampayPayoutRef pgtype.Text           `json:"campay_payout_ref"`
+	Status          RequestStatus         `json:"status"`
+	FailureReason   pgtype.Text           `json:"failure_reason"`
+	UssdCode        pgtype.Text           `json:"ussd_code"`
+	CreatedAt       time.Time             `json:"created_at"`
+	UpdatedAt       time.Time             `json:"updated_at"`
 }
 
 type PlatformAdmin struct {

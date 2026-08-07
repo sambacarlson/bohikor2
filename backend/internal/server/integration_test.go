@@ -20,6 +20,7 @@ import (
 	db "github.com/Iknite-Space/bohikor2/db/sqlc"
 	"github.com/Iknite-Space/bohikor2/internal/config"
 	"github.com/Iknite-Space/bohikor2/internal/database"
+	"github.com/Iknite-Space/bohikor2/internal/dbtypes"
 	"github.com/Iknite-Space/bohikor2/internal/handler"
 	"github.com/Iknite-Space/bohikor2/internal/service"
 )
@@ -136,7 +137,7 @@ func TestIntegration_RealPlatformStore(t *testing.T) {
 	}
 
 	// A top-up ledger entry increases the balance.
-	var amount pgtype.Numeric
+	var amount dbtypes.NumericString
 	if err := amount.Scan("500000"); err != nil {
 		t.Fatalf("scan amount: %v", err)
 	}
@@ -272,8 +273,8 @@ func TestIntegration_ServerNew(t *testing.T) {
 	}
 }
 
-// numericToStringT renders a pgtype.Numeric to a plain string for assertions.
-func numericToStringT(t *testing.T, n pgtype.Numeric) string {
+// numericToStringT renders a dbtypes.NumericString to a plain string for assertions.
+func numericToStringT(t *testing.T, n dbtypes.NumericString) string {
 	t.Helper()
 	v, err := n.Value()
 	if err != nil || v == nil {

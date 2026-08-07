@@ -17,6 +17,7 @@ import (
 
 	db "github.com/Iknite-Space/bohikor2/db/sqlc"
 	"github.com/Iknite-Space/bohikor2/internal/database"
+	"github.com/Iknite-Space/bohikor2/internal/dbtypes"
 )
 
 // These tests exercise TransitionRequest against a real Postgres, since its
@@ -104,7 +105,7 @@ func seedAdvanceRequest(t *testing.T, ctx context.Context, pool *pgxpool.Pool, i
 		t.Fatalf("seed user: %v", err)
 	}
 
-	var amountXaf pgtype.Numeric
+	var amountXaf dbtypes.NumericString
 	if err := amountXaf.Scan(amount); err != nil {
 		t.Fatalf("scan amount: %v", err)
 	}
@@ -147,8 +148,8 @@ func eventTypes(t *testing.T, ctx context.Context, queries *db.Queries, companyI
 	return types
 }
 
-// numericToStringT renders a pgtype.Numeric to a plain string for assertions.
-func numericToStringT(t *testing.T, n pgtype.Numeric) string {
+// numericToStringT renders a dbtypes.NumericString to a plain string for assertions.
+func numericToStringT(t *testing.T, n dbtypes.NumericString) string {
 	t.Helper()
 	v, err := n.Value()
 	if err != nil || v == nil {
@@ -220,7 +221,7 @@ func TestTransitionRequest_ToFailed_PostsReversalNettingToZero(t *testing.T) {
 	req := seedAdvanceRequest(t, ctx, pool, db.RequestStatusInitiated, "5000")
 
 	// Simulate the §2 debit that would have been posted at request-creation time.
-	var debitAmount pgtype.Numeric
+	var debitAmount dbtypes.NumericString
 	if err := debitAmount.Scan("-5000"); err != nil {
 		t.Fatalf("scan debit amount: %v", err)
 	}

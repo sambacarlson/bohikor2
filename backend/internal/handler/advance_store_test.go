@@ -18,6 +18,7 @@ import (
 
 	db "github.com/Iknite-Space/bohikor2/db/sqlc"
 	"github.com/Iknite-Space/bohikor2/internal/database"
+	"github.com/Iknite-Space/bohikor2/internal/dbtypes"
 	"github.com/Iknite-Space/bohikor2/internal/service"
 )
 
@@ -104,7 +105,7 @@ func TestRealAdvanceStore_CreateAdvanceRequestWithDebit_ReservesFloat(t *testing
 	queries := db.New(pool)
 	company, user := seedCompanyAndUser(t, ctx, queries)
 
-	var topUp pgtype.Numeric
+	var topUp dbtypes.NumericString
 	if err := topUp.Scan("5000"); err != nil {
 		t.Fatalf("scan top-up: %v", err)
 	}
@@ -118,7 +119,7 @@ func TestRealAdvanceStore_CreateAdvanceRequestWithDebit_ReservesFloat(t *testing
 
 	store := NewRealAdvanceStore(queries, pool)
 
-	var amount pgtype.Numeric
+	var amount dbtypes.NumericString
 	if err := amount.Scan("5000"); err != nil {
 		t.Fatalf("scan amount: %v", err)
 	}
@@ -156,7 +157,7 @@ func TestRealAdvanceStore_CreateAdvanceRequestWithDebit_ConcurrentRequestsDoNotO
 	queries := db.New(pool)
 	company, user := seedCompanyAndUser(t, ctx, queries)
 
-	var topUp pgtype.Numeric
+	var topUp dbtypes.NumericString
 	if err := topUp.Scan("6000"); err != nil {
 		t.Fatalf("scan top-up: %v", err)
 	}
@@ -170,7 +171,7 @@ func TestRealAdvanceStore_CreateAdvanceRequestWithDebit_ConcurrentRequestsDoNotO
 
 	store := NewRealAdvanceStore(queries, pool)
 
-	var amount pgtype.Numeric
+	var amount dbtypes.NumericString
 	if err := amount.Scan("5000"); err != nil {
 		t.Fatalf("scan amount: %v", err)
 	}
@@ -230,7 +231,7 @@ func TestRealAdvanceStore_Transition_CommitsThroughSharedHelper(t *testing.T) {
 	queries := db.New(pool)
 	company, user := seedCompanyAndUser(t, ctx, queries)
 
-	var amount pgtype.Numeric
+	var amount dbtypes.NumericString
 	if err := amount.Scan("5000"); err != nil {
 		t.Fatalf("scan amount: %v", err)
 	}
@@ -292,7 +293,7 @@ func TestRealAdvanceStore_PassThroughMethods(t *testing.T) {
 	}
 
 	// Create a request (still `initiated`, so it is "active").
-	var topUp pgtype.Numeric
+	var topUp dbtypes.NumericString
 	if err := topUp.Scan("2500"); err != nil {
 		t.Fatalf("scan top-up: %v", err)
 	}
@@ -304,7 +305,7 @@ func TestRealAdvanceStore_PassThroughMethods(t *testing.T) {
 		t.Fatalf("seed top-up: %v", err)
 	}
 
-	var amount pgtype.Numeric
+	var amount dbtypes.NumericString
 	if err := amount.Scan("2500"); err != nil {
 		t.Fatalf("scan amount: %v", err)
 	}
@@ -403,7 +404,7 @@ func TestRealAdvanceStore_ReissueAdvanceRequest_DoubleReissueReturnsUniqueViolat
 	queries := db.New(pool)
 	company, user := seedCompanyAndUser(t, ctx, queries)
 
-	var topUp pgtype.Numeric
+	var topUp dbtypes.NumericString
 	if err := topUp.Scan("20000"); err != nil {
 		t.Fatalf("scan top-up: %v", err)
 	}
@@ -415,7 +416,7 @@ func TestRealAdvanceStore_ReissueAdvanceRequest_DoubleReissueReturnsUniqueViolat
 		t.Fatalf("seed top-up: %v", err)
 	}
 
-	var amount pgtype.Numeric
+	var amount dbtypes.NumericString
 	if err := amount.Scan("5000"); err != nil {
 		t.Fatalf("scan amount: %v", err)
 	}

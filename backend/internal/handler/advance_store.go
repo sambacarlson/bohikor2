@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	db "github.com/Iknite-Space/bohikor2/db/sqlc"
+	"github.com/Iknite-Space/bohikor2/internal/dbtypes"
 	"github.com/Iknite-Space/bohikor2/internal/service"
 )
 
@@ -67,7 +68,7 @@ func (s *RealAdvanceStore) CountSuccessfulAdvanceRequestsByUserThisMonth(ctx con
 	return s.queries.CountSuccessfulAdvanceRequestsByUserThisMonth(ctx, userID)
 }
 
-func (s *RealAdvanceStore) GetCompanyBalance(ctx context.Context, companyID uuid.UUID) (pgtype.Numeric, error) {
+func (s *RealAdvanceStore) GetCompanyBalance(ctx context.Context, companyID uuid.UUID) (dbtypes.NumericString, error) {
 	return s.queries.GetCompanyBalance(ctx, companyID)
 }
 

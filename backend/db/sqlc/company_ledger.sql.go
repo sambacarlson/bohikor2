@@ -8,6 +8,7 @@ package db
 import (
 	"context"
 
+	"github.com/Iknite-Space/bohikor2/internal/dbtypes"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -18,12 +19,12 @@ VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, company_id, entry_type, amount_xaf
 `
 
 type CreateLedgerEntryParams struct {
-	CompanyID        uuid.UUID      `json:"company_id"`
-	EntryType        string         `json:"entry_type"`
-	AmountXaf        pgtype.Numeric `json:"amount_xaf"`
-	AdvanceRequestID pgtype.UUID    `json:"advance_request_id"`
-	CreatedBy        pgtype.UUID    `json:"created_by"`
-	Note             pgtype.Text    `json:"note"`
+	CompanyID        uuid.UUID             `json:"company_id"`
+	EntryType        string                `json:"entry_type"`
+	AmountXaf        dbtypes.NumericString `json:"amount_xaf"`
+	AdvanceRequestID pgtype.UUID           `json:"advance_request_id"`
+	CreatedBy        pgtype.UUID           `json:"created_by"`
+	Note             pgtype.Text           `json:"note"`
 }
 
 func (q *Queries) CreateLedgerEntry(ctx context.Context, arg CreateLedgerEntryParams) (CompanyLedger, error) {
@@ -54,9 +55,9 @@ SELECT COALESCE(SUM(amount_xaf), 0)::NUMERIC(14, 2) AS balance
 FROM company_ledger WHERE company_id = $1
 `
 
-func (q *Queries) GetCompanyBalance(ctx context.Context, companyID uuid.UUID) (pgtype.Numeric, error) {
+func (q *Queries) GetCompanyBalance(ctx context.Context, companyID uuid.UUID) (dbtypes.NumericString, error) {
 	row := q.db.QueryRow(ctx, getCompanyBalance, companyID)
-	var balance pgtype.Numeric
+	var balance dbtypes.NumericString
 	err := row.Scan(&balance)
 	return balance, err
 }
