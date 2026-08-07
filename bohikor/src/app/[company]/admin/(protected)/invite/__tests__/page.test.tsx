@@ -137,14 +137,19 @@ describe("InvitePage", () => {
     });
   });
 
+  function axiosError(status: number, message: string) {
+    return Object.assign(new Error(message), {
+      isAxiosError: true,
+      response: { status, data: { error: message } },
+    });
+  }
+
   it("shows duplicate error on 409 response", async () => {
     const user = userEvent.setup();
     const mutateFn = jest.fn().mockImplementation((_, callbacks) => {
-      const err = new Error("Conflict");
-      (err as unknown as { response: { status: number } }).response = {
-        status: 409,
-      };
-      callbacks.onError(err);
+      callbacks.onError(
+        axiosError(409, "an active invitation already exists for this email")
+      );
     });
     useInvitations.mockReturnValue({
       data: [],
@@ -166,8 +171,41 @@ describe("InvitePage", () => {
 
     await waitFor(() => {
       expect(
-        screen.getByText(/an active invitation already exists/i)
-      ).toBeInTheDocument();
+        screen.getAllByText(/an active invitation already exists/i).length
+      ).toBeGreaterThan(0);
+    });
+  });
+
+  it("shows a clear error when the email already belongs to a user or admin", async () => {
+    const user = userEvent.setup();
+    const mutateFn = jest.fn().mockImplementation((_, callbacks) => {
+      callbacks.onError(
+        axiosError(
+          409,
+          "this email is already registered as an employee or company admin"
+        )
+      );
+    });
+    useInvitations.mockReturnValue({
+      data: [],
+      isLoading: false,
+      refetch: jest.fn(),
+    });
+    useSendInvite.mockReturnValue({
+      mutate: mutateFn,
+      isPending: false,
+    });
+
+    renderWithProviders(<InvitePage />);
+
+    await user.type(screen.getByLabelText(/email address/i), "admin@example.com");
+    await user.click(screen.getByRole("button", { name: /invite/i }));
+
+    await waitFor(() => {
+      expect(
+        screen.getAllByText(/already registered as an employee or company admin/i)
+          .length
+      ).toBeGreaterThan(0);
     });
   });
 
@@ -218,7 +256,9 @@ describe("InvitePage", () => {
     await user.click(screen.getByRole("button", { name: /invite/i }));
 
     await waitFor(() => {
-      expect(screen.getAllByText(/failed to send invitation/i).length).toBeGreaterThan(0);
+      expect(
+        screen.getAllByText(/something went wrong\. please try again\./i).length
+      ).toBeGreaterThan(0);
     });
   });
 

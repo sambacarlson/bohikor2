@@ -16,10 +16,20 @@ import (
 
 var ErrActiveInvitationExists = errors.New("an active invitation already exists for this email")
 
+// ErrEmailAlreadyRegistered is returned when the invited email already
+// belongs to a user (employee) or admin anywhere in the system — email is
+// meant to be a single identity across the whole app, not just unique
+// within each of the users/admins tables independently. This also covers
+// an admin inviting their own email, since their email is already an
+// admins row.
+var ErrEmailAlreadyRegistered = errors.New("this email is already registered as an employee or company admin")
+
 type InviteStore interface {
 	GetInvitationByEmail(ctx context.Context, email string) (db.Invitation, error)
 	CreateInvitation(ctx context.Context, email string, companyID uuid.UUID, invitedBy pgtype.UUID) (db.Invitation, error)
 	UpdateInvitationStatus(ctx context.Context, status db.InvitationStatus, id pgtype.UUID) (db.Invitation, error)
+	GetUserByEmail(ctx context.Context, email string) (db.User, error)
+	GetAdminByEmail(ctx context.Context, email string) (db.Admin, error)
 }
 
 type AdminQuerier interface {
@@ -71,6 +81,16 @@ func (s *InviteService) Invite(ctx context.Context, email string, adminID string
 		}
 	}
 
+	// Email is one identity across the whole app: reject if it's already a
+	// user (any company) or an admin (any company, including the inviting
+	// admin's own email) before creating the invitation.
+	if _, err := s.store.GetUserByEmail(ctx, email); err == nil {
+		return nil, ErrEmailAlreadyRegistered
+	}
+	if _, err := s.store.GetAdminByEmail(ctx, email); err == nil {
+		return nil, ErrEmailAlreadyRegistered
+	}
+
 	// Company lookup happens only once the invite is known to actually
 	// proceed (past the duplicate-invitation check), since it's needed
 	// solely to build the signup URL below.
@@ -110,6 +130,14 @@ func NewRealInviteStore(queries *db.Queries) *RealInviteStore {
 
 func (s *RealInviteStore) GetInvitationByEmail(ctx context.Context, email string) (db.Invitation, error) {
 	return s.queries.GetInvitationByEmail(ctx, email)
+}
+
+func (s *RealInviteStore) GetUserByEmail(ctx context.Context, email string) (db.User, error) {
+	return s.queries.GetUserByEmail(ctx, email)
+}
+
+func (s *RealInviteStore) GetAdminByEmail(ctx context.Context, email string) (db.Admin, error) {
+	return s.queries.GetAdminByEmail(ctx, email)
 }
 
 func (s *RealInviteStore) CreateInvitation(ctx context.Context, email string, companyID uuid.UUID, invitedBy pgtype.UUID) (db.Invitation, error) {

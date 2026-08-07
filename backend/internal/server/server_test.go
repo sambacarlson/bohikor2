@@ -269,6 +269,14 @@ func (m *mockInviteStore) GetInvitationByEmail(ctx context.Context, email string
 	return *m.invitation, nil
 }
 
+func (m *mockInviteStore) GetUserByEmail(ctx context.Context, email string) (db.User, error) {
+	return db.User{}, errNotFound
+}
+
+func (m *mockInviteStore) GetAdminByEmail(ctx context.Context, email string) (db.Admin, error) {
+	return db.Admin{}, errNotFound
+}
+
 func (m *mockInviteStore) CreateInvitation(ctx context.Context, email string, companyID uuid.UUID, invitedBy pgtype.UUID) (db.Invitation, error) {
 	if m.createErr != nil {
 		return db.Invitation{}, m.createErr

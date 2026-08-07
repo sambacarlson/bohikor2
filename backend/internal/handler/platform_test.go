@@ -34,6 +34,18 @@ type mockPlatformStore struct {
 	needsReviewErr   error
 	health           []db.ListCompanyRequestHealthRow
 	healthErr        error
+	userByEmail      *db.User
+	userByEmailErr   error
+}
+
+func (m *mockPlatformStore) GetUserByEmail(ctx context.Context, email string) (db.User, error) {
+	if m.userByEmailErr != nil {
+		return db.User{}, m.userByEmailErr
+	}
+	if m.userByEmail == nil {
+		return db.User{}, errTestNotFound
+	}
+	return *m.userByEmail, nil
 }
 
 func (m *mockPlatformStore) CreateCompanyWithSettings(ctx context.Context, arg db.CreateCompanyParams) (db.Company, error) {
@@ -191,6 +203,30 @@ func TestCreateCompanyAdmin_ScopedToCompany(t *testing.T) {
 	}
 	if store.createAdminArg.PasswordHash != "hashed:secret123" {
 		t.Fatalf("expected password to be hashed, got %q", store.createAdminArg.PasswordHash)
+	}
+}
+
+func TestCreateCompanyAdmin_EmailAlreadyAUser(t *testing.T) {
+	companyID := uuid.New()
+	store := &mockPlatformStore{
+		userByEmail: &db.User{ID: uuid.New(), Email: "boss@acme.com"},
+	}
+	h := NewPlatformHandler(store, stubHasher{})
+	r := platformGin(store)
+	r.POST("/api/platform/companies/:id/admins", h.CreateCompanyAdmin)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequestWithContext(context.Background(), "POST",
+		"/api/platform/companies/"+companyID.String()+"/admins",
+		strings.NewReader(`{"email":"boss@acme.com","password":"secret123"}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+	if store.createAdminArg != nil {
+		t.Fatalf("expected CreateAdmin to be skipped, got %+v", store.createAdminArg)
 	}
 }
 

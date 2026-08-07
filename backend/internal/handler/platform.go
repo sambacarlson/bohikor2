@@ -27,6 +27,7 @@ type platformStore interface {
 	ListCompaniesWithBalance(ctx context.Context) ([]db.ListCompaniesWithBalanceRow, error)
 	UpdateCompanyStatus(ctx context.Context, arg db.UpdateCompanyStatusParams) (db.Company, error)
 	CreateAdmin(ctx context.Context, arg db.CreateAdminParams) (db.Admin, error)
+	GetUserByEmail(ctx context.Context, email string) (db.User, error)
 	CreateLedgerEntry(ctx context.Context, arg db.CreateLedgerEntryParams) (db.CompanyLedger, error)
 	GetCompanyBalance(ctx context.Context, companyID uuid.UUID) (dbtypes.NumericString, error)
 	ListRequestsNeedingReview(ctx context.Context) ([]db.ListRequestsNeedingReviewAcrossCompaniesRow, error)
@@ -89,6 +90,10 @@ func (s *RealPlatformStore) UpdateCompanyStatus(ctx context.Context, arg db.Upda
 
 func (s *RealPlatformStore) CreateAdmin(ctx context.Context, arg db.CreateAdminParams) (db.Admin, error) {
 	return s.queries.CreateAdmin(ctx, arg)
+}
+
+func (s *RealPlatformStore) GetUserByEmail(ctx context.Context, email string) (db.User, error) {
+	return s.queries.GetUserByEmail(ctx, email)
 }
 
 func (s *RealPlatformStore) CreateLedgerEntry(ctx context.Context, arg db.CreateLedgerEntryParams) (db.CompanyLedger, error) {
@@ -206,6 +211,15 @@ func (h *PlatformHandler) CreateCompanyAdmin(c *gin.Context) {
 
 	if _, err := h.store.GetCompanyByID(c.Request.Context(), companyID); err != nil {
 		JSONError(c, http.StatusNotFound, "not_found", "company not found")
+		return
+	}
+
+	// Email is one identity across the whole app: admins.email is already
+	// globally unique via a DB constraint (so this email can't already be an
+	// admin elsewhere), but nothing stops it from also being a user
+	// (employee) row without this check.
+	if _, err := h.store.GetUserByEmail(c.Request.Context(), req.Email); err == nil {
+		JSONError(c, http.StatusConflict, "email_already_registered", "this email is already registered as an employee")
 		return
 	}
 

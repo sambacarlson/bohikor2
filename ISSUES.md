@@ -102,7 +102,7 @@ change). Flagged by the user as worth solving but not yet scoped.
 
 **Verified 2026-08-07: confirmed valid DOS vector.**
 
-## - [ ] 6. No checks against self-invite or cross-company/cross-role email reuse
+## - [x] 6. No checks against self-invite or cross-company/cross-role email reuse
 
 `internal/service/invite.go` `Invite()` (54-101) only checks for an existing *pending* invitation
 to the same email (`GetInvitationByEmail`, 67-71) — never checks the `users` or `admins` tables,
@@ -116,6 +116,15 @@ the check — brainstorm exact rules (globally unique across `users`+`admins`? p
 one person hold both an admin and employee role by design?).
 
 **Verified 2026-08-07: still valid, zero checks exist.**
+
+**Resolved 2026-08-07 (#25):** policy decided — email is one identity across the whole app; an
+email already in `users` or `admins` (any company) blocks both a new invite (`Invite()` in
+`internal/service/invite.go`, which naturally also blocks an admin inviting their own email since
+that email is already an `admins` row) and platform-admin `CreateCompanyAdmin`. The reverse case
+(same admin email in two companies) was already blocked pre-existing by `admins.email`'s DB-level
+unique constraint. Frontend invite-error handling was also fixed: it previously assumed every 409
+meant "duplicate invitation" and would have shown a misleading message for this new case — now
+uses the shared `getApiErrorMessage()` helper to surface the backend's actual message.
 
 ## - [ ] 7. Login never verifies the URL's company slug server-side
 

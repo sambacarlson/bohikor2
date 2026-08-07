@@ -38,6 +38,10 @@ func HandleInvite(q InviteQuerier) gin.HandlerFunc {
 				JSONError(c, http.StatusConflict, "conflict", err.Error())
 				return
 			}
+			if errors.Is(err, service.ErrEmailAlreadyRegistered) {
+				JSONError(c, http.StatusConflict, "email_already_registered", err.Error())
+				return
+			}
 			JSONError(c, http.StatusInternalServerError, "internal_error", err.Error())
 			return
 		}

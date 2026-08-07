@@ -18,6 +18,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { toast } from "sonner";
 import { RefreshCw, Send, Mail } from "lucide-react";
+import { getApiErrorMessage } from "@/lib/api";
 
 export default function InvitePage() {
   const [email, setEmail] = useState("");
@@ -40,16 +41,9 @@ export default function InvitePage() {
         setEmail("");
       },
       onError: (err: unknown) => {
-        if (
-          err instanceof Error &&
-          "response" in err &&
-          (err as { response?: { status: number } }).response?.status === 409
-        ) {
-          setError("An active invitation already exists for this email");
-        } else {
-          setError("Failed to send invitation");
-        }
-        toast.error("Failed to send invitation");
+        const message = getApiErrorMessage(err);
+        setError(message);
+        toast.error(message);
       },
     });
   };

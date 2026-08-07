@@ -23,6 +23,22 @@ type mockStore struct {
 	updatedID     *pgtype.UUID
 	updatedStatus *db.InvitationStatus
 	createdEmail  string
+	userExists    bool
+	adminExists   bool
+}
+
+func (m *mockStore) GetUserByEmail(ctx context.Context, email string) (db.User, error) {
+	if m.userExists {
+		return db.User{Email: email}, nil
+	}
+	return db.User{}, errTestNotFound
+}
+
+func (m *mockStore) GetAdminByEmail(ctx context.Context, email string) (db.Admin, error) {
+	if m.adminExists {
+		return db.Admin{Email: email}, nil
+	}
+	return db.Admin{}, errTestNotFound
 }
 
 func (m *mockStore) GetInvitationByEmail(ctx context.Context, email string) (db.Invitation, error) {
@@ -196,6 +212,35 @@ func TestInvite_ActiveInvitationExists(t *testing.T) {
 	}
 	if adminQuerier.companyCalls != 0 {
 		t.Fatalf("expected company lookup to be skipped on the duplicate-invitation rejection path, got %d calls", adminQuerier.companyCalls)
+	}
+}
+
+func TestInvite_EmailAlreadyAUser(t *testing.T) {
+	store := &mockStore{userExists: true}
+	adminID := uuid.New()
+	adminQuerier := &mockAdminQuerier{admin: &db.Admin{ID: adminID}}
+	svc := NewInviteService(store, &mockEmailSender{}, adminQuerier, "https://app.bohikor.com")
+
+	_, err := svc.Invite(context.Background(), "employee@example.com", adminID.String())
+	if !errors.Is(err, ErrEmailAlreadyRegistered) {
+		t.Fatalf("expected ErrEmailAlreadyRegistered, got %v", err)
+	}
+	if adminQuerier.companyCalls != 0 {
+		t.Fatalf("expected company lookup to be skipped, got %d calls", adminQuerier.companyCalls)
+	}
+}
+
+// TestInvite_EmailAlreadyAnAdmin also covers an admin inviting their own
+// email, since the admin's own email is itself an admins row.
+func TestInvite_EmailAlreadyAnAdmin(t *testing.T) {
+	store := &mockStore{adminExists: true}
+	adminID := uuid.New()
+	adminQuerier := &mockAdminQuerier{admin: &db.Admin{ID: adminID}}
+	svc := NewInviteService(store, &mockEmailSender{}, adminQuerier, "https://app.bohikor.com")
+
+	_, err := svc.Invite(context.Background(), "admin@example.com", adminID.String())
+	if !errors.Is(err, ErrEmailAlreadyRegistered) {
+		t.Fatalf("expected ErrEmailAlreadyRegistered, got %v", err)
 	}
 }
 
