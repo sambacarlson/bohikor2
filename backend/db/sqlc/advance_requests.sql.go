@@ -7,7 +7,6 @@ package db
 
 import (
 	"context"
-	"database/sql"
 	"time"
 
 	"github.com/google/uuid"
@@ -263,22 +262,22 @@ type ListAdvanceRequestsWithUserByCompanyParams struct {
 }
 
 type ListAdvanceRequestsWithUserByCompanyRow struct {
-	ID                    uuid.UUID      `json:"id"`
-	CompanyID             uuid.UUID      `json:"company_id"`
-	UserID                uuid.UUID      `json:"user_id"`
-	AmountXaf             pgtype.Numeric `json:"amount_xaf"`
-	Status                RequestStatus  `json:"status"`
-	CampayPayoutRef       pgtype.Text    `json:"campay_payout_ref"`
-	FailureReason         pgtype.Text    `json:"failure_reason"`
-	PayoutDurationSeconds pgtype.Int4    `json:"payout_duration_seconds"`
-	AttemptCount          int32          `json:"attempt_count"`
-	LastReconciledAt      sql.NullTime   `json:"last_reconciled_at"`
-	NextRetryAt           sql.NullTime   `json:"next_retry_at"`
-	NeedsAdminReview      bool           `json:"needs_admin_review"`
-	ReissuedFromID        pgtype.UUID    `json:"reissued_from_id"`
-	CreatedAt             time.Time      `json:"created_at"`
-	UpdatedAt             time.Time      `json:"updated_at"`
-	UserEmail             string         `json:"user_email"`
+	ID                    uuid.UUID          `json:"id"`
+	CompanyID             uuid.UUID          `json:"company_id"`
+	UserID                uuid.UUID          `json:"user_id"`
+	AmountXaf             pgtype.Numeric     `json:"amount_xaf"`
+	Status                RequestStatus      `json:"status"`
+	CampayPayoutRef       pgtype.Text        `json:"campay_payout_ref"`
+	FailureReason         pgtype.Text        `json:"failure_reason"`
+	PayoutDurationSeconds pgtype.Int4        `json:"payout_duration_seconds"`
+	AttemptCount          int32              `json:"attempt_count"`
+	LastReconciledAt      pgtype.Timestamptz `json:"last_reconciled_at"`
+	NextRetryAt           pgtype.Timestamptz `json:"next_retry_at"`
+	NeedsAdminReview      bool               `json:"needs_admin_review"`
+	ReissuedFromID        pgtype.UUID        `json:"reissued_from_id"`
+	CreatedAt             time.Time          `json:"created_at"`
+	UpdatedAt             time.Time          `json:"updated_at"`
+	UserEmail             string             `json:"user_email"`
 }
 
 func (q *Queries) ListAdvanceRequestsWithUserByCompany(ctx context.Context, arg ListAdvanceRequestsWithUserByCompanyParams) ([]ListAdvanceRequestsWithUserByCompanyRow, error) {
@@ -442,24 +441,24 @@ LIMIT 500
 `
 
 type ListRequestsNeedingReviewAcrossCompaniesRow struct {
-	ID                    uuid.UUID      `json:"id"`
-	CompanyID             uuid.UUID      `json:"company_id"`
-	UserID                uuid.UUID      `json:"user_id"`
-	AmountXaf             pgtype.Numeric `json:"amount_xaf"`
-	Status                RequestStatus  `json:"status"`
-	CampayPayoutRef       pgtype.Text    `json:"campay_payout_ref"`
-	FailureReason         pgtype.Text    `json:"failure_reason"`
-	PayoutDurationSeconds pgtype.Int4    `json:"payout_duration_seconds"`
-	AttemptCount          int32          `json:"attempt_count"`
-	LastReconciledAt      sql.NullTime   `json:"last_reconciled_at"`
-	NextRetryAt           sql.NullTime   `json:"next_retry_at"`
-	NeedsAdminReview      bool           `json:"needs_admin_review"`
-	ReissuedFromID        pgtype.UUID    `json:"reissued_from_id"`
-	CreatedAt             time.Time      `json:"created_at"`
-	UpdatedAt             time.Time      `json:"updated_at"`
-	CompanySlug           string         `json:"company_slug"`
-	CompanyName           string         `json:"company_name"`
-	UserEmail             string         `json:"user_email"`
+	ID                    uuid.UUID          `json:"id"`
+	CompanyID             uuid.UUID          `json:"company_id"`
+	UserID                uuid.UUID          `json:"user_id"`
+	AmountXaf             pgtype.Numeric     `json:"amount_xaf"`
+	Status                RequestStatus      `json:"status"`
+	CampayPayoutRef       pgtype.Text        `json:"campay_payout_ref"`
+	FailureReason         pgtype.Text        `json:"failure_reason"`
+	PayoutDurationSeconds pgtype.Int4        `json:"payout_duration_seconds"`
+	AttemptCount          int32              `json:"attempt_count"`
+	LastReconciledAt      pgtype.Timestamptz `json:"last_reconciled_at"`
+	NextRetryAt           pgtype.Timestamptz `json:"next_retry_at"`
+	NeedsAdminReview      bool               `json:"needs_admin_review"`
+	ReissuedFromID        pgtype.UUID        `json:"reissued_from_id"`
+	CreatedAt             time.Time          `json:"created_at"`
+	UpdatedAt             time.Time          `json:"updated_at"`
+	CompanySlug           string             `json:"company_slug"`
+	CompanyName           string             `json:"company_name"`
+	UserEmail             string             `json:"user_email"`
 }
 
 // Platform-admin visibility into the needs_admin_review queue across every
@@ -549,9 +548,9 @@ WHERE id = $1 RETURNING id, company_id, user_id, amount_xaf, status, campay_payo
 `
 
 type UpdateAdvanceRequestReconcileAttemptParams struct {
-	ID               uuid.UUID    `json:"id"`
-	NextRetryAt      sql.NullTime `json:"next_retry_at"`
-	NeedsAdminReview bool         `json:"needs_admin_review"`
+	ID               uuid.UUID          `json:"id"`
+	NextRetryAt      pgtype.Timestamptz `json:"next_retry_at"`
+	NeedsAdminReview bool               `json:"needs_admin_review"`
 }
 
 func (q *Queries) UpdateAdvanceRequestReconcileAttempt(ctx context.Context, arg UpdateAdvanceRequestReconcileAttemptParams) (AdvanceRequest, error) {

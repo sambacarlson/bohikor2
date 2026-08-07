@@ -13,10 +13,7 @@ export interface User {
   phone_verified: boolean;
   status: UserStatus;
   is_terms_accepted: boolean;
-  // Deliberately `unknown`, not `string | null`: the backend's `sql.NullTime` wire shape is
-  // `{ Time: string; Valid: boolean }`, never a plain string. Don't widen this and don't render
-  // it; use `is_terms_accepted` for any accepted/not-accepted UI instead.
-  terms_accepted_at: unknown;
+  terms_accepted_at: string | null;
   terms_version: string | null;
   created_at: string;
   updated_at: string;
@@ -38,7 +35,7 @@ export interface AdminUser {
   locked_until: string | null;
   status: UserStatus;
   is_terms_accepted: boolean;
-  terms_accepted_at: unknown;
+  terms_accepted_at: string | null;
   terms_version: string | null;
   user_ip_at_consent: string | null;
   created_at: string;
@@ -109,10 +106,8 @@ export interface AdvanceRequest {
   failure_reason: string | null;
   payout_duration_seconds: number | null;
   attempt_count?: number;
-  // Both deliberately `unknown`, not `string | null` — same sql.NullTime wire-shape gotcha as
-  // User.terms_accepted_at above. Not rendered anywhere in this plan.
-  last_reconciled_at?: unknown;
-  next_retry_at?: unknown;
+  last_reconciled_at?: string | null;
+  next_retry_at?: string | null;
   needs_admin_review?: boolean;
   reissued_from_id?: string | null;
   created_at: string;

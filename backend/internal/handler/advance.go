@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -815,7 +814,7 @@ func HandleAcceptTerms(q userTermsQuerier) gin.HandlerFunc {
 		user, err := q.UpdateTermsAcceptance(c.Request.Context(), db.UpdateTermsAcceptanceParams{
 			ID:              userID,
 			IsTermsAccepted: true,
-			TermsAcceptedAt: sql.NullTime{Time: now, Valid: true},
+			TermsAcceptedAt: pgtype.Timestamptz{Time: now, Valid: true},
 			TermsVersion:    pgtype.Text{String: req.Version, Valid: true},
 		})
 		if err != nil {

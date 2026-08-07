@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -379,7 +378,7 @@ func TestForgotPin_PermanentlyBlocked(t *testing.T) {
 
 func TestForgotPin_TemporarilyBlocked(t *testing.T) {
 	q := &flexAuthQuerier{getEmailOTPFailure: func(string) (db.EmailOtpFailure, error) {
-		return db.EmailOtpFailure{BlockedUntil: sql.NullTime{Time: time.Now().UTC().Add(30 * time.Minute), Valid: true}}, nil
+		return db.EmailOtpFailure{BlockedUntil: pgtype.Timestamptz{Time: time.Now().UTC().Add(30 * time.Minute), Valid: true}}, nil
 	}}
 	h := newFlexAuthHandler(q, &trackingEmailSender{})
 	w := doReq(h, "POST", "/forgot", func(r *gin.Engine) { r.POST("/forgot", h.ForgotPin) },
@@ -874,7 +873,7 @@ func TestLogin_TemporarilyLockedUntil(t *testing.T) {
 	q := &mockAuthQuerier{user: &db.User{
 		ID: uuid.New(), Email: "w@acme.com", Status: db.UserStatusActive,
 		PinHash:     pgtype.Text{String: "hashed:12345", Valid: true},
-		LockedUntil: sql.NullTime{Time: time.Now().UTC().Add(30 * time.Minute), Valid: true},
+		LockedUntil: pgtype.Timestamptz{Time: time.Now().UTC().Add(30 * time.Minute), Valid: true},
 	}}
 	h := newTestAuthHandler(q)
 	w := postLogin(h, `{"email":"w@acme.com","pin":"12345"}`)

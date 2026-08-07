@@ -2,7 +2,6 @@ package reconciler
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"os"
 	"sync"
@@ -103,7 +102,7 @@ func seedRequest(t *testing.T, ctx context.Context, queries *db.Queries, status 
 	// (next_retry_at/created_at default to NOW() on insert).
 	if _, err := queries.UpdateAdvanceRequestReconcileAttempt(ctx, db.UpdateAdvanceRequestReconcileAttemptParams{
 		ID:               req.ID,
-		NextRetryAt:      sql.NullTime{Time: time.Now().Add(-time.Minute), Valid: true},
+		NextRetryAt:      pgtype.Timestamptz{Time: time.Now().Add(-time.Minute), Valid: true},
 		NeedsAdminReview: false,
 	}); err != nil {
 		t.Fatalf("backdate next_retry_at: %v", err)
@@ -194,7 +193,7 @@ func TestTick_FlagsNeedsAdminReviewAfterMaxAttempts(t *testing.T) {
 	for i := 0; i < len(backoffLadder); i++ {
 		r.Tick(ctx)
 		if _, err := queries.UpdateAdvanceRequestReconcileAttempt(ctx, db.UpdateAdvanceRequestReconcileAttemptParams{
-			ID: req.ID, NextRetryAt: sql.NullTime{Time: time.Now().Add(-time.Minute), Valid: true}, NeedsAdminReview: false,
+			ID: req.ID, NextRetryAt: pgtype.Timestamptz{Time: time.Now().Add(-time.Minute), Valid: true}, NeedsAdminReview: false,
 		}); err != nil {
 			t.Fatalf("backdate: %v", err)
 		}
@@ -222,7 +221,7 @@ func TestTick_NoRefRowsAgeIntoAdminReviewAfterGracePeriod(t *testing.T) {
 		t.Fatalf("backdate created_at: %v", err)
 	}
 	if _, err := queries.UpdateAdvanceRequestReconcileAttempt(ctx, db.UpdateAdvanceRequestReconcileAttemptParams{
-		ID: req.ID, NextRetryAt: sql.NullTime{Time: time.Now().Add(-time.Minute), Valid: true}, NeedsAdminReview: false,
+		ID: req.ID, NextRetryAt: pgtype.Timestamptz{Time: time.Now().Add(-time.Minute), Valid: true}, NeedsAdminReview: false,
 	}); err != nil {
 		t.Fatalf("backdate next_retry_at: %v", err)
 	}

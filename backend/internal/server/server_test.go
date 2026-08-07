@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -211,7 +210,7 @@ func TestUserMeEndpoint_ActiveUser(t *testing.T) {
 			Status:              db.UserStatusActive,
 			PinHash:             pgtype.Text{String: "$2a$10$secrethash", Valid: true},
 			FailedLoginAttempts: 2,
-			LockedUntil:         sql.NullTime{Time: time.Now(), Valid: true},
+			LockedUntil:         pgtype.Timestamptz{Time: time.Now(), Valid: true},
 			UserIpAtConsent:     &consentIP,
 		},
 	}

@@ -3,7 +3,6 @@ package handler
 import (
 	"context"
 	"crypto/rand"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -196,7 +195,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 			lockUntil := time.Now().UTC().Add(1 * time.Hour)
 			if _, err := h.queries.LockUserUntil(c.Request.Context(), db.LockUserUntilParams{
 				ID:          user.ID,
-				LockedUntil: sql.NullTime{Time: lockUntil, Valid: true},
+				LockedUntil: pgtype.Timestamptz{Time: lockUntil, Valid: true},
 			}); err != nil {
 				slog.Error("lock user until", "error", err, "user_id", user.ID)
 			}
@@ -566,7 +565,7 @@ func (h *AuthHandler) recordOTPFailure(c *gin.Context, email string) {
 		slog.Error("scan date", "error", err)
 	}
 
-	var blockedUntil sql.NullTime
+	var blockedUntil pgtype.Timestamptz
 	isPermanent := false
 
 	if consecutive >= 6 {
@@ -580,7 +579,7 @@ func (h *AuthHandler) recordOTPFailure(c *gin.Context, email string) {
 		}
 	} else if consecutive >= 3 && sameDay {
 		endOfDay := time.Date(now.Year(), now.Month(), now.Day(), 23, 59, 59, 0, time.UTC)
-		blockedUntil = sql.NullTime{Time: endOfDay, Valid: true}
+		blockedUntil = pgtype.Timestamptz{Time: endOfDay, Valid: true}
 	}
 
 	_, upsertErr := h.queries.UpsertEmailOTPFailure(ctx, db.UpsertEmailOTPFailureParams{

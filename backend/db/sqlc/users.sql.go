@@ -7,7 +7,6 @@ package db
 
 import (
 	"context"
-	"database/sql"
 	"net/netip"
 
 	"github.com/google/uuid"
@@ -275,8 +274,8 @@ WHERE id = $1 RETURNING id, company_id, email, email_verified, full_name, phone_
 `
 
 type LockUserUntilParams struct {
-	ID          uuid.UUID    `json:"id"`
-	LockedUntil sql.NullTime `json:"locked_until"`
+	ID          uuid.UUID          `json:"id"`
+	LockedUntil pgtype.Timestamptz `json:"locked_until"`
 }
 
 func (q *Queries) LockUserUntil(ctx context.Context, arg LockUserUntilParams) (User, error) {
@@ -446,11 +445,11 @@ WHERE id = $1 RETURNING id, company_id, email, email_verified, full_name, phone_
 `
 
 type UpdateTermsAcceptanceParams struct {
-	ID              uuid.UUID    `json:"id"`
-	IsTermsAccepted bool         `json:"is_terms_accepted"`
-	TermsAcceptedAt sql.NullTime `json:"terms_accepted_at"`
-	TermsVersion    pgtype.Text  `json:"terms_version"`
-	UserIpAtConsent *netip.Addr  `json:"user_ip_at_consent"`
+	ID              uuid.UUID          `json:"id"`
+	IsTermsAccepted bool               `json:"is_terms_accepted"`
+	TermsAcceptedAt pgtype.Timestamptz `json:"terms_accepted_at"`
+	TermsVersion    pgtype.Text        `json:"terms_version"`
+	UserIpAtConsent *netip.Addr        `json:"user_ip_at_consent"`
 }
 
 func (q *Queries) UpdateTermsAcceptance(ctx context.Context, arg UpdateTermsAcceptanceParams) (User, error) {

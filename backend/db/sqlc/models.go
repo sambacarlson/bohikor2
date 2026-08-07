@@ -5,7 +5,6 @@
 package db
 
 import (
-	"database/sql"
 	"database/sql/driver"
 	"fmt"
 	"net/netip"
@@ -199,21 +198,21 @@ type Admin struct {
 }
 
 type AdvanceRequest struct {
-	ID                    uuid.UUID      `json:"id"`
-	CompanyID             uuid.UUID      `json:"company_id"`
-	UserID                uuid.UUID      `json:"user_id"`
-	AmountXaf             pgtype.Numeric `json:"amount_xaf"`
-	Status                RequestStatus  `json:"status"`
-	CampayPayoutRef       pgtype.Text    `json:"campay_payout_ref"`
-	FailureReason         pgtype.Text    `json:"failure_reason"`
-	PayoutDurationSeconds pgtype.Int4    `json:"payout_duration_seconds"`
-	AttemptCount          int32          `json:"attempt_count"`
-	LastReconciledAt      sql.NullTime   `json:"last_reconciled_at"`
-	NextRetryAt           sql.NullTime   `json:"next_retry_at"`
-	NeedsAdminReview      bool           `json:"needs_admin_review"`
-	ReissuedFromID        pgtype.UUID    `json:"reissued_from_id"`
-	CreatedAt             time.Time      `json:"created_at"`
-	UpdatedAt             time.Time      `json:"updated_at"`
+	ID                    uuid.UUID          `json:"id"`
+	CompanyID             uuid.UUID          `json:"company_id"`
+	UserID                uuid.UUID          `json:"user_id"`
+	AmountXaf             pgtype.Numeric     `json:"amount_xaf"`
+	Status                RequestStatus      `json:"status"`
+	CampayPayoutRef       pgtype.Text        `json:"campay_payout_ref"`
+	FailureReason         pgtype.Text        `json:"failure_reason"`
+	PayoutDurationSeconds pgtype.Int4        `json:"payout_duration_seconds"`
+	AttemptCount          int32              `json:"attempt_count"`
+	LastReconciledAt      pgtype.Timestamptz `json:"last_reconciled_at"`
+	NextRetryAt           pgtype.Timestamptz `json:"next_retry_at"`
+	NeedsAdminReview      bool               `json:"needs_admin_review"`
+	ReissuedFromID        pgtype.UUID        `json:"reissued_from_id"`
+	CreatedAt             time.Time          `json:"created_at"`
+	UpdatedAt             time.Time          `json:"updated_at"`
 }
 
 type Company struct {
@@ -246,13 +245,13 @@ type EmailOtp struct {
 }
 
 type EmailOtpFailure struct {
-	Email                string       `json:"email"`
-	ConsecutiveFailures  int32        `json:"consecutive_failures"`
-	LastFailureDate      pgtype.Date  `json:"last_failure_date"`
-	BlockedUntil         sql.NullTime `json:"blocked_until"`
-	IsPermanentlyBlocked bool         `json:"is_permanently_blocked"`
-	CreatedAt            time.Time    `json:"created_at"`
-	UpdatedAt            time.Time    `json:"updated_at"`
+	Email                string             `json:"email"`
+	ConsecutiveFailures  int32              `json:"consecutive_failures"`
+	LastFailureDate      pgtype.Date        `json:"last_failure_date"`
+	BlockedUntil         pgtype.Timestamptz `json:"blocked_until"`
+	IsPermanentlyBlocked bool               `json:"is_permanently_blocked"`
+	CreatedAt            time.Time          `json:"created_at"`
+	UpdatedAt            time.Time          `json:"updated_at"`
 }
 
 type Event struct {
@@ -266,14 +265,14 @@ type Event struct {
 }
 
 type Invitation struct {
-	ID         uuid.UUID        `json:"id"`
-	CompanyID  uuid.UUID        `json:"company_id"`
-	Email      string           `json:"email"`
-	Status     InvitationStatus `json:"status"`
-	InvitedBy  pgtype.UUID      `json:"invited_by"`
-	SentAt     time.Time        `json:"sent_at"`
-	AcceptedAt sql.NullTime     `json:"accepted_at"`
-	UpdatedAt  time.Time        `json:"updated_at"`
+	ID         uuid.UUID          `json:"id"`
+	CompanyID  uuid.UUID          `json:"company_id"`
+	Email      string             `json:"email"`
+	Status     InvitationStatus   `json:"status"`
+	InvitedBy  pgtype.UUID        `json:"invited_by"`
+	SentAt     time.Time          `json:"sent_at"`
+	AcceptedAt pgtype.Timestamptz `json:"accepted_at"`
+	UpdatedAt  time.Time          `json:"updated_at"`
 }
 
 type PhoneVerification struct {
@@ -315,21 +314,21 @@ type Setting struct {
 }
 
 type User struct {
-	ID                  uuid.UUID    `json:"id"`
-	CompanyID           uuid.UUID    `json:"company_id"`
-	Email               string       `json:"email"`
-	EmailVerified       bool         `json:"email_verified"`
-	FullName            pgtype.Text  `json:"full_name"`
-	PhoneNumber         pgtype.Text  `json:"phone_number"`
-	PhoneVerified       bool         `json:"phone_verified"`
-	PinHash             pgtype.Text  `json:"pin_hash"`
-	FailedLoginAttempts int32        `json:"failed_login_attempts"`
-	LockedUntil         sql.NullTime `json:"locked_until"`
-	Status              UserStatus   `json:"status"`
-	IsTermsAccepted     bool         `json:"is_terms_accepted"`
-	TermsAcceptedAt     sql.NullTime `json:"terms_accepted_at"`
-	TermsVersion        pgtype.Text  `json:"terms_version"`
-	UserIpAtConsent     *netip.Addr  `json:"user_ip_at_consent"`
-	CreatedAt           time.Time    `json:"created_at"`
-	UpdatedAt           time.Time    `json:"updated_at"`
+	ID                  uuid.UUID          `json:"id"`
+	CompanyID           uuid.UUID          `json:"company_id"`
+	Email               string             `json:"email"`
+	EmailVerified       bool               `json:"email_verified"`
+	FullName            pgtype.Text        `json:"full_name"`
+	PhoneNumber         pgtype.Text        `json:"phone_number"`
+	PhoneVerified       bool               `json:"phone_verified"`
+	PinHash             pgtype.Text        `json:"pin_hash"`
+	FailedLoginAttempts int32              `json:"failed_login_attempts"`
+	LockedUntil         pgtype.Timestamptz `json:"locked_until"`
+	Status              UserStatus         `json:"status"`
+	IsTermsAccepted     bool               `json:"is_terms_accepted"`
+	TermsAcceptedAt     pgtype.Timestamptz `json:"terms_accepted_at"`
+	TermsVersion        pgtype.Text        `json:"terms_version"`
+	UserIpAtConsent     *netip.Addr        `json:"user_ip_at_consent"`
+	CreatedAt           time.Time          `json:"created_at"`
+	UpdatedAt           time.Time          `json:"updated_at"`
 }

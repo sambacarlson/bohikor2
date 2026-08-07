@@ -2,12 +2,12 @@ package reconciler
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	db "github.com/Iknite-Space/bohikor2/db/sqlc"
@@ -125,7 +125,7 @@ func (r *Reconciler) handleNoRef(ctx context.Context, req db.AdvanceRequest) {
 	}
 	if _, err := r.queries.UpdateAdvanceRequestReconcileAttempt(ctx, db.UpdateAdvanceRequestReconcileAttemptParams{
 		ID:               req.ID,
-		NextRetryAt:      sql.NullTime{Valid: false},
+		NextRetryAt:      pgtype.Timestamptz{Valid: false},
 		NeedsAdminReview: true,
 	}); err != nil {
 		slog.Error("flag no-ref row for admin review", "error", err, "request_id", req.ID)
@@ -137,7 +137,7 @@ func (r *Reconciler) bumpAttempt(ctx context.Context, req db.AdvanceRequest) {
 	if attempt >= len(backoffLadder) {
 		if _, err := r.queries.UpdateAdvanceRequestReconcileAttempt(ctx, db.UpdateAdvanceRequestReconcileAttemptParams{
 			ID:               req.ID,
-			NextRetryAt:      sql.NullTime{Valid: false},
+			NextRetryAt:      pgtype.Timestamptz{Valid: false},
 			NeedsAdminReview: true,
 		}); err != nil {
 			slog.Error("flag row for admin review after max attempts", "error", err, "request_id", req.ID)
@@ -148,7 +148,7 @@ func (r *Reconciler) bumpAttempt(ctx context.Context, req db.AdvanceRequest) {
 	next := time.Now().Add(backoffLadder[attempt])
 	if _, err := r.queries.UpdateAdvanceRequestReconcileAttempt(ctx, db.UpdateAdvanceRequestReconcileAttemptParams{
 		ID:               req.ID,
-		NextRetryAt:      sql.NullTime{Time: next, Valid: true},
+		NextRetryAt:      pgtype.Timestamptz{Time: next, Valid: true},
 		NeedsAdminReview: false,
 	}); err != nil {
 		slog.Error("bump reconcile attempt", "error", err, "request_id", req.ID)

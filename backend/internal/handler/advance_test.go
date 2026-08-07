@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -272,7 +271,7 @@ func TestCreateRequest_NotTermsAccepted(t *testing.T) {
 			Status:              db.UserStatusActive,
 			PinHash:             pgtype.Text{Valid: false},
 			FailedLoginAttempts: 0,
-			LockedUntil:         sql.NullTime{},
+			LockedUntil:         pgtype.Timestamptz{},
 		},
 	}
 	h := NewAdvanceHandler(q, &mockCampayTransferer{}, &mockAdvanceSettingsQuerier{}, time.UTC)
@@ -305,7 +304,7 @@ func TestCreateRequest_ActiveRequestExists(t *testing.T) {
 			Status:              db.UserStatusActive,
 			PinHash:             pgtype.Text{Valid: false},
 			FailedLoginAttempts: 0,
-			LockedUntil:         sql.NullTime{},
+			LockedUntil:         pgtype.Timestamptz{},
 		},
 		activeRequest: &db.AdvanceRequest{
 			ID:     uuid.New(),
@@ -343,7 +342,7 @@ func TestCreateRequest_PhoneNotVerified(t *testing.T) {
 			Status:              db.UserStatusActive,
 			PinHash:             pgtype.Text{Valid: false},
 			FailedLoginAttempts: 0,
-			LockedUntil:         sql.NullTime{},
+			LockedUntil:         pgtype.Timestamptz{},
 		},
 	}
 	h := NewAdvanceHandler(q, &mockCampayTransferer{}, &mockAdvanceSettingsQuerier{}, time.UTC)
@@ -376,7 +375,7 @@ func TestCreateRequest_TransferSuccess(t *testing.T) {
 			Status:              db.UserStatusActive,
 			PinHash:             pgtype.Text{Valid: false},
 			FailedLoginAttempts: 0,
-			LockedUntil:         sql.NullTime{},
+			LockedUntil:         pgtype.Timestamptz{},
 		},
 	}
 	transferMock := &mockCampayTransferer{
@@ -420,7 +419,7 @@ func TestCreateRequest_TransferPending(t *testing.T) {
 			Status:              db.UserStatusActive,
 			PinHash:             pgtype.Text{Valid: false},
 			FailedLoginAttempts: 0,
-			LockedUntil:         sql.NullTime{},
+			LockedUntil:         pgtype.Timestamptz{},
 		},
 	}
 	transferMock := &mockCampayTransferer{
@@ -464,7 +463,7 @@ func TestCreateRequest_TransferTransportError_MapsToProcessing(t *testing.T) {
 			Status:              db.UserStatusActive,
 			PinHash:             pgtype.Text{Valid: false},
 			FailedLoginAttempts: 0,
-			LockedUntil:         sql.NullTime{},
+			LockedUntil:         pgtype.Timestamptz{},
 		},
 	}
 	transferMock := &mockCampayTransferer{
@@ -503,7 +502,7 @@ func TestCreateRequest_TransferDeclinedByCampay_MapsToFailed(t *testing.T) {
 			Status:              db.UserStatusActive,
 			PinHash:             pgtype.Text{Valid: false},
 			FailedLoginAttempts: 0,
-			LockedUntil:         sql.NullTime{},
+			LockedUntil:         pgtype.Timestamptz{},
 		},
 	}
 	transferMock := &mockCampayTransferer{
@@ -543,7 +542,7 @@ func TestCreateRequest_TransferTransportError_TransitionWriteFails_Returns500(t 
 			Status:              db.UserStatusActive,
 			PinHash:             pgtype.Text{Valid: false},
 			FailedLoginAttempts: 0,
-			LockedUntil:         sql.NullTime{},
+			LockedUntil:         pgtype.Timestamptz{},
 		},
 		updateErr: errors.New("connection reset by peer"),
 	}
@@ -585,7 +584,7 @@ func TestCreateRequest_TransferDeclined_TransitionWriteFails_Returns500(t *testi
 			Status:              db.UserStatusActive,
 			PinHash:             pgtype.Text{Valid: false},
 			FailedLoginAttempts: 0,
-			LockedUntil:         sql.NullTime{},
+			LockedUntil:         pgtype.Timestamptz{},
 		},
 		updateErr: errors.New("connection reset by peer"),
 	}
@@ -628,7 +627,7 @@ func TestCreateRequest_RequireActiveUser_ShouldBeEnforcedByMiddleware(t *testing
 			Status:              db.UserStatusSuspended,
 			PinHash:             pgtype.Text{Valid: false},
 			FailedLoginAttempts: 0,
-			LockedUntil:         sql.NullTime{},
+			LockedUntil:         pgtype.Timestamptz{},
 		},
 	}
 	transferMock := &mockCampayTransferer{
@@ -1139,7 +1138,7 @@ func TestRequireActiveUser_Unauthenticated(t *testing.T) {
 			Status:              db.UserStatusActive,
 			PinHash:             pgtype.Text{Valid: false},
 			FailedLoginAttempts: 0,
-			LockedUntil:         sql.NullTime{},
+			LockedUntil:         pgtype.Timestamptz{},
 		},
 	}
 	h := NewAdvanceHandler(q, &mockCampayTransferer{}, &mockAdvanceSettingsQuerier{}, time.UTC)

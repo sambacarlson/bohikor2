@@ -7,7 +7,6 @@ package db
 
 import (
 	"context"
-	"database/sql"
 
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -53,11 +52,11 @@ RETURNING email, consecutive_failures, last_failure_date, blocked_until, is_perm
 `
 
 type UpsertEmailOTPFailureParams struct {
-	Email                string       `json:"email"`
-	ConsecutiveFailures  int32        `json:"consecutive_failures"`
-	LastFailureDate      pgtype.Date  `json:"last_failure_date"`
-	BlockedUntil         sql.NullTime `json:"blocked_until"`
-	IsPermanentlyBlocked bool         `json:"is_permanently_blocked"`
+	Email                string             `json:"email"`
+	ConsecutiveFailures  int32              `json:"consecutive_failures"`
+	LastFailureDate      pgtype.Date        `json:"last_failure_date"`
+	BlockedUntil         pgtype.Timestamptz `json:"blocked_until"`
+	IsPermanentlyBlocked bool               `json:"is_permanently_blocked"`
 }
 
 func (q *Queries) UpsertEmailOTPFailure(ctx context.Context, arg UpsertEmailOTPFailureParams) (EmailOtpFailure, error) {
