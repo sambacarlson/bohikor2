@@ -19,7 +19,7 @@ from `routes.go`.
 **Resolved 2026-08-07 (#19):** exported `sanitizeUser()` as `handler.SanitizeUser` and routed
 `handleUserMe` through it; regression test asserts the leaked fields never appear in the response.
 
-## - [ ] 2. `sql.NullTime` fields serialize as `{Time, Valid}` objects, not plain nullable strings
+## - [x] 2. `sql.NullTime` fields serialize as `{Time, Valid}` objects, not plain nullable strings
 
 `db/sqlc.yaml:24-29` maps nullable `timestamptz` → `database/sql.NullTime`, which has no custom
 `MarshalJSON`. Confirmed affected fields (`db/sqlc/models.go`): `AdvanceRequest.LastReconciledAt`/
@@ -35,6 +35,13 @@ marshal cleanly.
 correctly, consistent with the rest of the schema) rather than patching every handler individually.
 
 **Verified 2026-08-07: still valid, scope expanded.**
+
+**Resolved 2026-08-07 (#21):** overrode `db/sqlc.yaml`'s nullable `timestamptz` mapping to
+`pgtype.Timestamptz` (confirmed empirically to marshal as a plain ISO string or `null`), updated
+every call site, and widened the frontend's defensively-`unknown` fields to `string | null`. Also
+fixed a live bug this uncovered: `GET /api/admin/users`' `locked_until` had been rendering
+`Invalid Date` since the frontend `AdminUser` type already (incorrectly, until now) assumed the
+correct shape.
 
 ## - [ ] 3. `amount_xaf` fields serialize as JSON numbers but are typed `string` in the frontend
 
