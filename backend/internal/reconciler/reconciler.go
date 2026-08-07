@@ -113,6 +113,8 @@ func (r *Reconciler) reconcileOne(ctx context.Context, req db.AdvanceRequest) {
 }
 
 func (r *Reconciler) pollAndTransition(ctx context.Context, req db.AdvanceRequest) {
+	slog.Info("reconciling advance request", "request_id", req.ID, "campay_ref", req.CampayPayoutRef.String)
+
 	status, err := r.campayClient.GetTransactionStatus(ctx, req.CampayPayoutRef.String)
 	if err != nil {
 		slog.Error("poll campay transaction status", "error", err, "request_id", req.ID)
@@ -180,7 +182,9 @@ func (r *Reconciler) transition(ctx context.Context, req db.AdvanceRequest, newS
 	}
 	if err := tx.Commit(ctx); err != nil {
 		slog.Error("commit reconciler transition", "error", err, "request_id", req.ID)
+		return
 	}
+	slog.Info("advance request reconciliation resolved", "request_id", req.ID, "status", newStatus)
 }
 
 // ---------------------------------------------------------------------------
@@ -200,6 +204,8 @@ func (r *Reconciler) reconcilePhoneVerificationOne(ctx context.Context, v db.Pho
 }
 
 func (r *Reconciler) pollAndTransitionPhoneVerification(ctx context.Context, v db.PhoneVerification) {
+	slog.Info("reconciling phone verification", "verification_id", v.ID, "campay_ref", v.CampayPayoutRef.String)
+
 	status, err := r.campayClient.GetTransactionStatus(ctx, v.CampayPayoutRef.String)
 	if err != nil {
 		slog.Error("poll campay transaction status for phone verification", "error", err, "verification_id", v.ID)
@@ -273,6 +279,7 @@ func (r *Reconciler) transitionPhoneVerification(ctx context.Context, v db.Phone
 		slog.Error("reconciler transition phone verification", "error", err, "verification_id", v.ID)
 		return
 	}
+	slog.Info("phone verification reconciliation resolved", "verification_id", v.ID, "status", newStatus)
 
 	if newStatus != db.RequestStatusSuccess {
 		return
