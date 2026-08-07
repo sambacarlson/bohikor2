@@ -556,7 +556,7 @@ func TestAdminLogin_Success(t *testing.T) {
 	}}
 	h := newFlexAuthHandler(q, &trackingEmailSender{})
 	w := doReq(h, "POST", "/admin/login", func(r *gin.Engine) { r.POST("/admin/login", h.AdminLogin) },
-		`{"email":"admin@acme.com","password":"secret"}`)
+		`{"email":"admin@acme.com","password":"secret","company_slug":"acme"}`)
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
@@ -584,12 +584,12 @@ func TestAdminLogin_SuspendedCompanyBlocks(t *testing.T) {
 			return db.Admin{ID: uuid.New(), CompanyID: uuid.New(), Email: "admin@acme.com", PasswordHash: "hashed:secret"}, nil
 		},
 		getCompanyByID: func(uuid.UUID) (db.Company, error) {
-			return db.Company{Status: db.CompanyStatusSuspended}, nil
+			return db.Company{Slug: "acme", Status: db.CompanyStatusSuspended}, nil
 		},
 	}
 	h := newFlexAuthHandler(q, &trackingEmailSender{})
 	w := doReq(h, "POST", "/admin/login", func(r *gin.Engine) { r.POST("/admin/login", h.AdminLogin) },
-		`{"email":"admin@acme.com","password":"secret"}`)
+		`{"email":"admin@acme.com","password":"secret","company_slug":"acme"}`)
 	if w.Code != http.StatusForbidden || codeOf(t, w.Body.Bytes()) != "company_suspended" {
 		t.Fatalf("expected 403 company_suspended, got %d: %s", w.Code, w.Body.String())
 	}
@@ -619,9 +619,23 @@ func TestAdminLogin_WrongPassword(t *testing.T) {
 	}}
 	h := newFlexAuthHandler(q, &trackingEmailSender{})
 	w := doReq(h, "POST", "/admin/login", func(r *gin.Engine) { r.POST("/admin/login", h.AdminLogin) },
-		`{"email":"admin@acme.com","password":"wrong"}`)
+		`{"email":"admin@acme.com","password":"wrong","company_slug":"acme"}`)
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d", w.Code)
+	}
+}
+
+// See TestLogin_WrongCompanySlug: the {company} slug in the admin login URL
+// was previously never checked server-side either.
+func TestAdminLogin_WrongCompanySlug(t *testing.T) {
+	q := &flexAuthQuerier{getAdminByEmail: func(string) (db.Admin, error) {
+		return db.Admin{ID: uuid.New(), CompanyID: uuid.New(), PasswordHash: "hashed:secret"}, nil
+	}}
+	h := newFlexAuthHandler(q, &trackingEmailSender{})
+	w := doReq(h, "POST", "/admin/login", func(r *gin.Engine) { r.POST("/admin/login", h.AdminLogin) },
+		`{"email":"admin@acme.com","password":"secret","company_slug":"someone-elses-company"}`)
+	if w.Code != http.StatusUnauthorized || codeOf(t, w.Body.Bytes()) != "invalid_credentials" {
+		t.Fatalf("expected 401 invalid_credentials, got %d: %s", w.Code, w.Body.String())
 	}
 }
 
@@ -629,7 +643,7 @@ func TestAdminLogin_NotFound(t *testing.T) {
 	q := &flexAuthQuerier{}
 	h := newFlexAuthHandler(q, &trackingEmailSender{})
 	w := doReq(h, "POST", "/admin/login", func(r *gin.Engine) { r.POST("/admin/login", h.AdminLogin) },
-		`{"email":"admin@acme.com","password":"secret"}`)
+		`{"email":"admin@acme.com","password":"secret","company_slug":"acme"}`)
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d", w.Code)
 	}
@@ -840,7 +854,7 @@ func TestLogin_Validation(t *testing.T) {
 func TestLogin_UnknownEmail(t *testing.T) {
 	q := &mockAuthQuerier{userErr: errTestNotFound}
 	h := newTestAuthHandler(q)
-	if w := postLogin(h, `{"email":"ghost@acme.com","pin":"12345"}`); w.Code != http.StatusUnauthorized {
+	if w := postLogin(h, `{"email":"ghost@acme.com","pin":"12345","company_slug":"acme"}`); w.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d", w.Code)
 	}
 }
@@ -851,7 +865,7 @@ func TestLogin_AccountLocked(t *testing.T) {
 		PinHash: pgtype.Text{String: "hashed:12345", Valid: true},
 	}}
 	h := newTestAuthHandler(q)
-	w := postLogin(h, `{"email":"w@acme.com","pin":"12345"}`)
+	w := postLogin(h, `{"email":"w@acme.com","pin":"12345","company_slug":"acme"}`)
 	if w.Code != http.StatusForbidden || codeOf(t, w.Body.Bytes()) != "account_locked" {
 		t.Fatalf("expected 403 account_locked, got %d %s", w.Code, w.Body.String())
 	}
@@ -863,7 +877,7 @@ func TestLogin_AccountSuspended(t *testing.T) {
 		PinHash: pgtype.Text{String: "hashed:12345", Valid: true},
 	}}
 	h := newTestAuthHandler(q)
-	w := postLogin(h, `{"email":"w@acme.com","pin":"12345"}`)
+	w := postLogin(h, `{"email":"w@acme.com","pin":"12345","company_slug":"acme"}`)
 	if w.Code != http.StatusForbidden || codeOf(t, w.Body.Bytes()) != "account_suspended" {
 		t.Fatalf("expected 403 account_suspended, got %d %s", w.Code, w.Body.String())
 	}
@@ -876,7 +890,7 @@ func TestLogin_TemporarilyLockedUntil(t *testing.T) {
 		LockedUntil: pgtype.Timestamptz{Time: time.Now().UTC().Add(30 * time.Minute), Valid: true},
 	}}
 	h := newTestAuthHandler(q)
-	w := postLogin(h, `{"email":"w@acme.com","pin":"12345"}`)
+	w := postLogin(h, `{"email":"w@acme.com","pin":"12345","company_slug":"acme"}`)
 	if w.Code != http.StatusTooManyRequests {
 		t.Fatalf("expected 429, got %d", w.Code)
 	}
@@ -888,7 +902,7 @@ func TestLogin_NoPinSet(t *testing.T) {
 		PinHash: pgtype.Text{Valid: false},
 	}}
 	h := newTestAuthHandler(q)
-	w := postLogin(h, `{"email":"w@acme.com","pin":"12345"}`)
+	w := postLogin(h, `{"email":"w@acme.com","pin":"12345","company_slug":"acme"}`)
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d", w.Code)
 	}
@@ -901,7 +915,7 @@ func TestLogin_ThirdWrongAttemptTempLocks(t *testing.T) {
 		FailedLoginAttempts: 2, // next wrong attempt -> 3
 	}}
 	h := newTestAuthHandler(q)
-	w := postLogin(h, `{"email":"w@acme.com","pin":"00000"}`)
+	w := postLogin(h, `{"email":"w@acme.com","pin":"00000","company_slug":"acme"}`)
 	if w.Code != http.StatusTooManyRequests || codeOf(t, w.Body.Bytes()) != "too_many_attempts" {
 		t.Fatalf("expected 429 too_many_attempts at 3rd failure, got %d %s", w.Code, w.Body.String())
 	}
@@ -914,7 +928,7 @@ func TestLogin_SixthWrongAttemptLocks(t *testing.T) {
 		FailedLoginAttempts: 5, // next wrong attempt -> 6
 	}}
 	h := newTestAuthHandler(q)
-	w := postLogin(h, `{"email":"w@acme.com","pin":"00000"}`)
+	w := postLogin(h, `{"email":"w@acme.com","pin":"00000","company_slug":"acme"}`)
 	if w.Code != http.StatusForbidden || codeOf(t, w.Body.Bytes()) != "account_locked" {
 		t.Fatalf("expected 403 account_locked at 6th failure, got %d %s", w.Code, w.Body.String())
 	}
@@ -930,7 +944,7 @@ func TestLogin_CompanyResolveError(t *testing.T) {
 		companyErr: errors.New("boom"),
 	}
 	h := newTestAuthHandler(q)
-	w := postLogin(h, `{"email":"w@acme.com","pin":"12345"}`)
+	w := postLogin(h, `{"email":"w@acme.com","pin":"12345","company_slug":"acme"}`)
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("expected 500, got %d", w.Code)
 	}
@@ -952,7 +966,7 @@ func TestAdminLogin_TokenFailed(t *testing.T) {
 	}})
 	h := newFlexAuthHandler(q, &trackingEmailSender{})
 	w := doReq(h, "POST", "/admin/login", func(r *gin.Engine) { r.POST("/admin/login", h.AdminLogin) },
-		`{"email":"a@acme.com","password":"secret"}`)
+		`{"email":"a@acme.com","password":"secret","company_slug":"acme"}`)
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("expected 500 token_failed, got %d", w.Code)
 	}

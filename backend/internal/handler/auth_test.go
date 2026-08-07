@@ -154,7 +154,7 @@ func TestLogin_ResolvesCompanySlug(t *testing.T) {
 	}
 	h := newTestAuthHandler(q)
 
-	w := postLogin(h, `{"email":"worker@acme.com","pin":"12345"}`)
+	w := postLogin(h, `{"email":"worker@acme.com","pin":"12345","company_slug":"acme-corp"}`)
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
@@ -186,7 +186,7 @@ func TestLogin_SuspendedCompanyBlocks(t *testing.T) {
 	}
 	h := newTestAuthHandler(q)
 
-	w := postLogin(h, `{"email":"worker@acme.com","pin":"12345"}`)
+	w := postLogin(h, `{"email":"worker@acme.com","pin":"12345","company_slug":"acme-corp"}`)
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("expected 403, got %d: %s", w.Code, w.Body.String())
 	}
@@ -208,8 +208,34 @@ func TestLogin_WrongPin(t *testing.T) {
 	}
 	h := newTestAuthHandler(q)
 
-	w := postLogin(h, `{"email":"worker@acme.com","pin":"00000"}`)
+	w := postLogin(h, `{"email":"worker@acme.com","pin":"00000","company_slug":"acme"}`)
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d", w.Code)
+	}
+}
+
+// A correct email+PIN for the wrong company slug must be rejected exactly
+// like a wrong PIN — the {company} slug in the login URL was previously
+// never checked server-side, so any slug would resolve the real account.
+func TestLogin_WrongCompanySlug(t *testing.T) {
+	companyID := uuid.New()
+	q := &mockAuthQuerier{
+		user: &db.User{
+			ID:        uuid.New(),
+			CompanyID: companyID,
+			Email:     "worker@acme.com",
+			Status:    db.UserStatusActive,
+			PinHash:   pgtype.Text{String: "hashed:12345", Valid: true},
+		},
+		company: &db.Company{ID: companyID, Slug: "acme-corp", Status: db.CompanyStatusActive},
+	}
+	h := newTestAuthHandler(q)
+
+	w := postLogin(h, `{"email":"worker@acme.com","pin":"12345","company_slug":"someone-elses-company"}`)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d: %s", w.Code, w.Body.String())
+	}
+	if codeOf(t, w.Body.Bytes()) != "invalid_credentials" {
+		t.Fatalf("expected invalid_credentials code, got %s", w.Body.String())
 	}
 }

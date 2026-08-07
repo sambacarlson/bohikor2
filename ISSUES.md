@@ -126,7 +126,7 @@ unique constraint. Frontend invite-error handling was also fixed: it previously 
 meant "duplicate invitation" and would have shown a misleading message for this new case — now
 uses the shared `getApiErrorMessage()` helper to surface the backend's actual message.
 
-## - [ ] 7. Login never verifies the URL's company slug server-side
+## - [x] 7. Login never verifies the URL's company slug server-side
 
 `POST /login` (`server.go:99`) request struct only has `Email`/`PIN`
 (`auth.go:142-145`) — no slug field. Company is resolved *after* authentication purely from
@@ -139,6 +139,14 @@ match the resolved user's company — closes the gap the user flagged ("verify c
 matches... before login").
 
 **Verified 2026-08-07: still valid.**
+
+**Resolved 2026-08-07 (#26):** `Login()` and `AdminLogin()` now require `company_slug` in the
+request body and reject (same generic `invalid_credentials` message as a wrong PIN/password — a
+slug mismatch can't be used to probe which company an email belongs to) if it doesn't match the
+resolved user's/admin's actual company. Reuses the `GetCompanyByID` call each handler already made
+post-auth, so no extra query. `PlatformLogin` is untouched (no company concept). Frontend: both
+`[company]/login` and `[company]/admin/login` now send the URL's `{company}` param as
+`company_slug`.
 
 ## - [ ] 8. Phone verification has no reconciler coverage
 

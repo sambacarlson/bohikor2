@@ -73,6 +73,7 @@ describe("AdminLoginPage", () => {
     expect(api.post).toHaveBeenCalledWith("/api/auth/admin/login", {
       email: "admin@example.com",
       password: "password123",
+      company_slug: "acme",
     });
   });
 

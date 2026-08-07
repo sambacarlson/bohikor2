@@ -84,6 +84,7 @@ describe("EmployeeLoginPage", () => {
     expect(mockMutateAsync).toHaveBeenCalledWith({
       email: "employee@example.com",
       pin: "12345",
+      company_slug: "acme",
     });
   });
 

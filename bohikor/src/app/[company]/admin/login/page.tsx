@@ -42,7 +42,11 @@ export default function AdminLoginPage() {
     setLoading(true);
 
     try {
-      const { data } = await api.post("/api/auth/admin/login", { email, password });
+      const { data } = await api.post("/api/auth/admin/login", {
+        email,
+        password,
+        company_slug: company,
+      });
       setTokens(data.data.access_token, data.data.refresh_token);
       setSubjectHint("admin");
       await refreshSubject();

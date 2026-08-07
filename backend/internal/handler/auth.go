@@ -139,11 +139,12 @@ func (h *AuthHandler) resolveCompanyForSubject(ctx context.Context, subjectType 
 
 func (h *AuthHandler) Login(c *gin.Context) {
 	var req struct {
-		Email string `json:"email" binding:"required,email"`
-		PIN   string `json:"pin" binding:"required"`
+		Email       string `json:"email" binding:"required,email"`
+		PIN         string `json:"pin" binding:"required"`
+		CompanySlug string `json:"company_slug" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		JSONError(c, http.StatusBadRequest, "invalid_request", "email and pin are required")
+		JSONError(c, http.StatusBadRequest, "invalid_request", "email, pin, and company_slug are required")
 		return
 	}
 
@@ -212,6 +213,14 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	company, err := h.queries.GetCompanyByID(c.Request.Context(), user.CompanyID)
 	if err != nil {
 		JSONError(c, http.StatusInternalServerError, "internal_error", "Failed to resolve company")
+		return
+	}
+	// The {company} slug in the login URL is otherwise just a frontend
+	// routing artifact — reject if it doesn't match this user's actual
+	// company. Same generic message as a wrong PIN, so a slug mismatch
+	// can't be used to probe which company an email belongs to.
+	if company.Slug != req.CompanySlug {
+		JSONError(c, http.StatusUnauthorized, "invalid_credentials", "Invalid email or PIN")
 		return
 	}
 	if company.Status == db.CompanyStatusSuspended {
@@ -615,18 +624,23 @@ func bindEmailPassword(c *gin.Context) (email, password string, ok bool) {
 }
 
 func (h *AuthHandler) AdminLogin(c *gin.Context) {
-	email, password, ok := bindEmailPassword(c)
-	if !ok {
+	var req struct {
+		Email       string `json:"email" binding:"required,email"`
+		Password    string `json:"password" binding:"required"`
+		CompanySlug string `json:"company_slug" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		JSONError(c, http.StatusBadRequest, "invalid_request", "email, password, and company_slug are required")
 		return
 	}
 
-	admin, err := h.queries.GetAdminByEmail(c.Request.Context(), email)
+	admin, err := h.queries.GetAdminByEmail(c.Request.Context(), req.Email)
 	if err != nil {
 		JSONError(c, http.StatusUnauthorized, "invalid_credentials", "Invalid email or password")
 		return
 	}
 
-	if !h.hasher.Verify(admin.PasswordHash, password) {
+	if !h.hasher.Verify(admin.PasswordHash, req.Password) {
 		JSONError(c, http.StatusUnauthorized, "invalid_credentials", "Invalid email or password")
 		return
 	}
@@ -634,6 +648,12 @@ func (h *AuthHandler) AdminLogin(c *gin.Context) {
 	company, err := h.queries.GetCompanyByID(c.Request.Context(), admin.CompanyID)
 	if err != nil {
 		JSONError(c, http.StatusInternalServerError, "internal_error", "Failed to resolve company")
+		return
+	}
+	// See Login()'s matching check: the {company} slug in the admin login
+	// URL is otherwise never validated server-side.
+	if company.Slug != req.CompanySlug {
+		JSONError(c, http.StatusUnauthorized, "invalid_credentials", "Invalid email or password")
 		return
 	}
 	if company.Status == db.CompanyStatusSuspended {

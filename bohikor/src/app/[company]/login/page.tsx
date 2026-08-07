@@ -46,7 +46,7 @@ export default function EmployeeLoginPage() {
     }
 
     try {
-      const result = await login.mutateAsync({ email, pin });
+      const result = await login.mutateAsync({ email, pin, company_slug: company });
       setTokens(result.access_token, result.refresh_token);
       setSubjectHint("user");
       await refreshSubject();

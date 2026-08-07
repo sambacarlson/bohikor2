@@ -43,10 +43,12 @@ export function useVerifyEmailOtp() {
   });
 }
 
-// POST /api/auth/login  { email, pin }  -> 200 { data: AuthResponse } (includes company_slug)
+// POST /api/auth/login  { email, pin, company_slug }  -> 200 { data: AuthResponse }
+// company_slug must match the resolved user's actual company (server-verified) or the
+// request is rejected the same as a wrong PIN — see backend/internal/handler/auth.go's Login().
 export function useLogin() {
   return useMutation({
-    mutationFn: async (input: { email: string; pin: string }) => {
+    mutationFn: async (input: { email: string; pin: string; company_slug: string }) => {
       const { data } = await api.post<{ data: AuthResponse }>("/api/auth/login", input);
       return data.data;
     },
