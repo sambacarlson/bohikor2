@@ -148,7 +148,7 @@ post-auth, so no extra query. `PlatformLogin` is untouched (no company concept).
 `[company]/login` and `[company]/admin/login` now send the URL's `{company}` param as
 `company_slug`.
 
-## - [ ] 8. Phone verification has no reconciler coverage
+## - [x] 8. Phone verification has no reconciler coverage
 
 Phone verification is genuinely async/webhook-based (Campay USSD push), not synchronous OTP:
 `AddPhoneNumber` (`internal/handler/phone.go:43-187`) creates a `phone_verifications` row
@@ -168,6 +168,18 @@ verification doesn't permanently lock the user out.
 
 **Verified 2026-08-07: still valid** (dedicated investigation, confirmed webhook-only with no
 fallback).
+
+**Resolved 2026-08-07 (#27):** added the same `attempt_count`/`last_reconciled_at`/`next_retry_at`/
+`needs_admin_review` columns to `phone_verifications` and extended `Reconciler.Tick` to also poll
+and resolve stuck rows via `ListReconcilablePhoneVerifications`/`UpdatePhoneVerificationReconcileAttempt`
+(parallel to the `advance_requests` path, but without `service.TransitionRequest`'s ledger/
+transaction machinery — phone verification never touches the company ledger, matching
+`handlePhoneVerificationWebhook`'s existing plain-update pattern). For the "resend" half: found
+`GetActivePhoneVerificationByUser` had no age bound at all, while the frontend's `canRetry` UX
+already assumed a stuck verification could be retried after 60s — a pre-existing mismatch, not just
+this issue's gap. Fixed by age-bounding that query to 60s, which is both simpler and faster than
+waiting on `needs_admin_review` (~23min backoff ladder) and finally makes the frontend's existing
+retry affordance actually work. No frontend changes needed.
 
 ## - [ ] 9. Some 500 responses don't log the underlying error (rescoped from "no debug logs")
 

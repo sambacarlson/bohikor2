@@ -181,6 +181,12 @@ CREATE TABLE phone_verifications (
     status request_status NOT NULL DEFAULT 'initiated',
     failure_reason TEXT,
     ussd_code TEXT,
+    -- Resilience columns, mirroring advance_requests: give the reconciler
+    -- (internal/reconciler/) the same stuck-webhook coverage here as payouts.
+    attempt_count INT NOT NULL DEFAULT 0,
+    last_reconciled_at TIMESTAMPTZ,
+    next_retry_at TIMESTAMPTZ,
+    needs_admin_review BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -188,6 +194,7 @@ CREATE TABLE phone_verifications (
 CREATE INDEX idx_phone_verifications_company_id ON phone_verifications (company_id);
 CREATE INDEX idx_phone_verifications_user_id ON phone_verifications (user_id);
 CREATE INDEX idx_phone_verifications_status ON phone_verifications (status);
+CREATE INDEX idx_phone_verifications_needs_admin_review ON phone_verifications (needs_admin_review) WHERE needs_admin_review = TRUE;
 
 -- ---------------------------------------------------------------------------
 -- Settings (per-company; seeded on company create). No global seed here.

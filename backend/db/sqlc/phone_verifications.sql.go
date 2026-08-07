@@ -15,7 +15,7 @@ import (
 
 const createPhoneVerification = `-- name: CreatePhoneVerification :one
 INSERT INTO phone_verifications (company_id, user_id, phone_number, amount_xaf, status)
-VALUES ($1, $2, $3, $4, $5) RETURNING id, company_id, user_id, phone_number, amount_xaf, campay_payout_ref, status, failure_reason, ussd_code, created_at, updated_at
+VALUES ($1, $2, $3, $4, $5) RETURNING id, company_id, user_id, phone_number, amount_xaf, campay_payout_ref, status, failure_reason, ussd_code, attempt_count, last_reconciled_at, next_retry_at, needs_admin_review, created_at, updated_at
 `
 
 type CreatePhoneVerificationParams struct {
@@ -45,6 +45,10 @@ func (q *Queries) CreatePhoneVerification(ctx context.Context, arg CreatePhoneVe
 		&i.Status,
 		&i.FailureReason,
 		&i.UssdCode,
+		&i.AttemptCount,
+		&i.LastReconciledAt,
+		&i.NextRetryAt,
+		&i.NeedsAdminReview,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -52,11 +56,19 @@ func (q *Queries) CreatePhoneVerification(ctx context.Context, arg CreatePhoneVe
 }
 
 const getActivePhoneVerificationByUser = `-- name: GetActivePhoneVerificationByUser :one
-SELECT id, company_id, user_id, phone_number, amount_xaf, campay_payout_ref, status, failure_reason, ussd_code, created_at, updated_at FROM phone_verifications
+SELECT id, company_id, user_id, phone_number, amount_xaf, campay_payout_ref, status, failure_reason, ussd_code, attempt_count, last_reconciled_at, next_retry_at, needs_admin_review, created_at, updated_at FROM phone_verifications
 WHERE user_id = $1 AND status IN ('initiated', 'processing', 'pending')
+  AND created_at > NOW() - INTERVAL '60 seconds'
 ORDER BY created_at DESC LIMIT 1
 `
 
+// Age-bounded to 60s to match the frontend's own retry affordance
+// (bohikor/.../account/page.tsx's canRetry lets the user resubmit once a
+// pending/initiated verification is >=60s old) — without this bound, a
+// verification stuck on a lost webhook would 409-block every retry attempt
+// until the reconciler's full backoff ladder (~23min) gives up on it.
+// Older stuck rows are left for the reconciler to keep resolving in the
+// background; the user is just no longer blocked from starting a fresh one.
 func (q *Queries) GetActivePhoneVerificationByUser(ctx context.Context, userID uuid.UUID) (PhoneVerification, error) {
 	row := q.db.QueryRow(ctx, getActivePhoneVerificationByUser, userID)
 	var i PhoneVerification
@@ -70,6 +82,10 @@ func (q *Queries) GetActivePhoneVerificationByUser(ctx context.Context, userID u
 		&i.Status,
 		&i.FailureReason,
 		&i.UssdCode,
+		&i.AttemptCount,
+		&i.LastReconciledAt,
+		&i.NextRetryAt,
+		&i.NeedsAdminReview,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -77,7 +93,7 @@ func (q *Queries) GetActivePhoneVerificationByUser(ctx context.Context, userID u
 }
 
 const getLatestPhoneVerificationByUser = `-- name: GetLatestPhoneVerificationByUser :one
-SELECT id, company_id, user_id, phone_number, amount_xaf, campay_payout_ref, status, failure_reason, ussd_code, created_at, updated_at FROM phone_verifications
+SELECT id, company_id, user_id, phone_number, amount_xaf, campay_payout_ref, status, failure_reason, ussd_code, attempt_count, last_reconciled_at, next_retry_at, needs_admin_review, created_at, updated_at FROM phone_verifications
 WHERE user_id = $1
 ORDER BY created_at DESC LIMIT 1
 `
@@ -95,6 +111,10 @@ func (q *Queries) GetLatestPhoneVerificationByUser(ctx context.Context, userID u
 		&i.Status,
 		&i.FailureReason,
 		&i.UssdCode,
+		&i.AttemptCount,
+		&i.LastReconciledAt,
+		&i.NextRetryAt,
+		&i.NeedsAdminReview,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -102,7 +122,7 @@ func (q *Queries) GetLatestPhoneVerificationByUser(ctx context.Context, userID u
 }
 
 const getPhoneVerificationByCampayRef = `-- name: GetPhoneVerificationByCampayRef :one
-SELECT id, company_id, user_id, phone_number, amount_xaf, campay_payout_ref, status, failure_reason, ussd_code, created_at, updated_at FROM phone_verifications WHERE campay_payout_ref = $1
+SELECT id, company_id, user_id, phone_number, amount_xaf, campay_payout_ref, status, failure_reason, ussd_code, attempt_count, last_reconciled_at, next_retry_at, needs_admin_review, created_at, updated_at FROM phone_verifications WHERE campay_payout_ref = $1
 `
 
 // Webhook resolves by Campay reference (globally unique); no company context.
@@ -119,6 +139,103 @@ func (q *Queries) GetPhoneVerificationByCampayRef(ctx context.Context, campayPay
 		&i.Status,
 		&i.FailureReason,
 		&i.UssdCode,
+		&i.AttemptCount,
+		&i.LastReconciledAt,
+		&i.NextRetryAt,
+		&i.NeedsAdminReview,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const listReconcilablePhoneVerifications = `-- name: ListReconcilablePhoneVerifications :many
+SELECT id, company_id, user_id, phone_number, amount_xaf, campay_payout_ref, status, failure_reason, ussd_code, attempt_count, last_reconciled_at, next_retry_at, needs_admin_review, created_at, updated_at FROM phone_verifications
+WHERE needs_admin_review = FALSE
+  AND (
+    (status = 'pending' AND campay_payout_ref IS NOT NULL AND (next_retry_at IS NULL OR next_retry_at <= NOW()))
+    OR (status = 'initiated' AND created_at <= NOW() - INTERVAL '60 seconds')
+  )
+ORDER BY created_at ASC
+`
+
+// Mirrors ListReconcilableAdvanceRequests (see that query's comment for the
+// full rationale): ref'd pending rows past their next_retry_at, or
+// initiated rows old enough to be a process-crash artifact (row created but
+// the Campay collect call, or the follow-up status write, never completed).
+// Phone verification never uses 'processing' (status only ever moves
+// initiated -> pending -> success/failed), so unlike advance_requests there
+// is no "processing with no ref" case to cover here. Excludes rows already
+// flagged for a human.
+func (q *Queries) ListReconcilablePhoneVerifications(ctx context.Context) ([]PhoneVerification, error) {
+	rows, err := q.db.Query(ctx, listReconcilablePhoneVerifications)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []PhoneVerification
+	for rows.Next() {
+		var i PhoneVerification
+		if err := rows.Scan(
+			&i.ID,
+			&i.CompanyID,
+			&i.UserID,
+			&i.PhoneNumber,
+			&i.AmountXaf,
+			&i.CampayPayoutRef,
+			&i.Status,
+			&i.FailureReason,
+			&i.UssdCode,
+			&i.AttemptCount,
+			&i.LastReconciledAt,
+			&i.NextRetryAt,
+			&i.NeedsAdminReview,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const updatePhoneVerificationReconcileAttempt = `-- name: UpdatePhoneVerificationReconcileAttempt :one
+UPDATE phone_verifications SET
+    attempt_count = attempt_count + 1,
+    last_reconciled_at = NOW(),
+    next_retry_at = $2,
+    needs_admin_review = $3,
+    updated_at = NOW()
+WHERE id = $1 RETURNING id, company_id, user_id, phone_number, amount_xaf, campay_payout_ref, status, failure_reason, ussd_code, attempt_count, last_reconciled_at, next_retry_at, needs_admin_review, created_at, updated_at
+`
+
+type UpdatePhoneVerificationReconcileAttemptParams struct {
+	ID               uuid.UUID          `json:"id"`
+	NextRetryAt      pgtype.Timestamptz `json:"next_retry_at"`
+	NeedsAdminReview bool               `json:"needs_admin_review"`
+}
+
+func (q *Queries) UpdatePhoneVerificationReconcileAttempt(ctx context.Context, arg UpdatePhoneVerificationReconcileAttemptParams) (PhoneVerification, error) {
+	row := q.db.QueryRow(ctx, updatePhoneVerificationReconcileAttempt, arg.ID, arg.NextRetryAt, arg.NeedsAdminReview)
+	var i PhoneVerification
+	err := row.Scan(
+		&i.ID,
+		&i.CompanyID,
+		&i.UserID,
+		&i.PhoneNumber,
+		&i.AmountXaf,
+		&i.CampayPayoutRef,
+		&i.Status,
+		&i.FailureReason,
+		&i.UssdCode,
+		&i.AttemptCount,
+		&i.LastReconciledAt,
+		&i.NextRetryAt,
+		&i.NeedsAdminReview,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -132,7 +249,7 @@ UPDATE phone_verifications SET
     campay_payout_ref = $4,
     ussd_code = $5,
     updated_at = NOW()
-WHERE id = $1 RETURNING id, company_id, user_id, phone_number, amount_xaf, campay_payout_ref, status, failure_reason, ussd_code, created_at, updated_at
+WHERE id = $1 RETURNING id, company_id, user_id, phone_number, amount_xaf, campay_payout_ref, status, failure_reason, ussd_code, attempt_count, last_reconciled_at, next_retry_at, needs_admin_review, created_at, updated_at
 `
 
 type UpdatePhoneVerificationStatusParams struct {
@@ -162,6 +279,10 @@ func (q *Queries) UpdatePhoneVerificationStatus(ctx context.Context, arg UpdateP
 		&i.Status,
 		&i.FailureReason,
 		&i.UssdCode,
+		&i.AttemptCount,
+		&i.LastReconciledAt,
+		&i.NextRetryAt,
+		&i.NeedsAdminReview,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

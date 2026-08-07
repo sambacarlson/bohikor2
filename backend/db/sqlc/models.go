@@ -277,17 +277,21 @@ type Invitation struct {
 }
 
 type PhoneVerification struct {
-	ID              uuid.UUID             `json:"id"`
-	CompanyID       uuid.UUID             `json:"company_id"`
-	UserID          uuid.UUID             `json:"user_id"`
-	PhoneNumber     string                `json:"phone_number"`
-	AmountXaf       dbtypes.NumericString `json:"amount_xaf"`
-	CampayPayoutRef pgtype.Text           `json:"campay_payout_ref"`
-	Status          RequestStatus         `json:"status"`
-	FailureReason   pgtype.Text           `json:"failure_reason"`
-	UssdCode        pgtype.Text           `json:"ussd_code"`
-	CreatedAt       time.Time             `json:"created_at"`
-	UpdatedAt       time.Time             `json:"updated_at"`
+	ID               uuid.UUID             `json:"id"`
+	CompanyID        uuid.UUID             `json:"company_id"`
+	UserID           uuid.UUID             `json:"user_id"`
+	PhoneNumber      string                `json:"phone_number"`
+	AmountXaf        dbtypes.NumericString `json:"amount_xaf"`
+	CampayPayoutRef  pgtype.Text           `json:"campay_payout_ref"`
+	Status           RequestStatus         `json:"status"`
+	FailureReason    pgtype.Text           `json:"failure_reason"`
+	UssdCode         pgtype.Text           `json:"ussd_code"`
+	AttemptCount     int32                 `json:"attempt_count"`
+	LastReconciledAt pgtype.Timestamptz    `json:"last_reconciled_at"`
+	NextRetryAt      pgtype.Timestamptz    `json:"next_retry_at"`
+	NeedsAdminReview bool                  `json:"needs_admin_review"`
+	CreatedAt        time.Time             `json:"created_at"`
+	UpdatedAt        time.Time             `json:"updated_at"`
 }
 
 type PlatformAdmin struct {

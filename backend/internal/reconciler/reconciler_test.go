@@ -115,6 +115,50 @@ func seedRequest(t *testing.T, ctx context.Context, queries *db.Queries, status 
 	return req
 }
 
+func seedPhoneVerification(t *testing.T, ctx context.Context, queries *db.Queries, status db.RequestStatus, campayRef string) db.PhoneVerification {
+	t.Helper()
+	company, err := queries.CreateCompany(ctx, db.CreateCompanyParams{Slug: "co-" + uuid.NewString()[:8], Name: "Test Co"})
+	if err != nil {
+		t.Fatalf("seed company: %v", err)
+	}
+	user, err := queries.CreateUser(ctx, db.CreateUserParams{CompanyID: company.ID, Email: "u-" + uuid.NewString()[:8] + "@acme.com", Status: db.UserStatusActive})
+	if err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	var amount dbtypes.NumericString
+	if err := amount.Scan("100"); err != nil {
+		t.Fatalf("scan amount: %v", err)
+	}
+	v, err := queries.CreatePhoneVerification(ctx, db.CreatePhoneVerificationParams{
+		CompanyID: company.ID, UserID: user.ID, PhoneNumber: "+237600000000", AmountXaf: amount, Status: status,
+	})
+	if err != nil {
+		t.Fatalf("seed phone verification: %v", err)
+	}
+	ref := pgtype.Text{Valid: false}
+	if campayRef != "" {
+		ref = pgtype.Text{String: campayRef, Valid: true}
+	}
+	v, err = queries.UpdatePhoneVerificationStatus(ctx, db.UpdatePhoneVerificationStatusParams{ID: v.ID, Status: status, CampayPayoutRef: ref})
+	if err != nil {
+		t.Fatalf("set campay ref: %v", err)
+	}
+	// Force the row into the past so it's picked up by ListReconcilablePhoneVerifications
+	// (next_retry_at/created_at default to NOW() on insert).
+	if _, err := queries.UpdatePhoneVerificationReconcileAttempt(ctx, db.UpdatePhoneVerificationReconcileAttemptParams{
+		ID:               v.ID,
+		NextRetryAt:      pgtype.Timestamptz{Time: time.Now().Add(-time.Minute), Valid: true},
+		NeedsAdminReview: false,
+	}); err != nil {
+		t.Fatalf("backdate next_retry_at: %v", err)
+	}
+	v, err = queries.GetLatestPhoneVerificationByUser(ctx, user.ID)
+	if err != nil {
+		t.Fatalf("reload phone verification: %v", err)
+	}
+	return v
+}
+
 type fakeStatusPoller struct {
 	responses map[string]*campay.TransactionStatusResponse
 	errs      map[string]error
@@ -381,5 +425,175 @@ func TestTick_RefdProcessingRowWithNoNextRetryAt_IsSurfacedByQuery(t *testing.T)
 	}
 	if updated.Status != db.RequestStatusSuccess {
 		t.Fatalf("expected ref'd processing row with NULL next_retry_at to be surfaced by ListReconcilableAdvanceRequests and resolved to success, got status=%s", updated.Status)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Phone verifications — mirrors the advance-request Tick tests above.
+// ---------------------------------------------------------------------------
+
+func TestTick_ResolvesSuccessfulPhoneVerification(t *testing.T) {
+	dsn := getPG(t)
+	ctx := context.Background()
+	pool := newPool(t, dsn)
+	queries := db.New(pool)
+	v := seedPhoneVerification(t, ctx, queries, db.RequestStatusPending, "phone-ref-success")
+
+	poller := &fakeStatusPoller{responses: map[string]*campay.TransactionStatusResponse{
+		"phone-ref-success": {Reference: "phone-ref-success", Status: "SUCCESSFUL"},
+	}}
+	r := New(pool, queries, poller)
+	r.Tick(ctx)
+
+	updated, err := queries.GetLatestPhoneVerificationByUser(ctx, v.UserID)
+	if err != nil {
+		t.Fatalf("GetLatestPhoneVerificationByUser: %v", err)
+	}
+	if updated.Status != db.RequestStatusSuccess {
+		t.Fatalf("expected success, got %s", updated.Status)
+	}
+
+	user, err := queries.GetUserByID(ctx, v.UserID)
+	if err != nil {
+		t.Fatalf("GetUserByID: %v", err)
+	}
+	if !user.PhoneVerified {
+		t.Fatal("expected phone_verified to be set true by the reconciler, same as the webhook path")
+	}
+}
+
+func TestTick_ResolvesFailedPhoneVerification(t *testing.T) {
+	dsn := getPG(t)
+	ctx := context.Background()
+	pool := newPool(t, dsn)
+	queries := db.New(pool)
+	v := seedPhoneVerification(t, ctx, queries, db.RequestStatusPending, "phone-ref-failed")
+
+	poller := &fakeStatusPoller{responses: map[string]*campay.TransactionStatusResponse{
+		"phone-ref-failed": {Reference: "phone-ref-failed", Status: "FAILED", Reason: "insufficient funds"},
+	}}
+	r := New(pool, queries, poller)
+	r.Tick(ctx)
+
+	updated, err := queries.GetLatestPhoneVerificationByUser(ctx, v.UserID)
+	if err != nil {
+		t.Fatalf("GetLatestPhoneVerificationByUser: %v", err)
+	}
+	if updated.Status != db.RequestStatusFailed {
+		t.Fatalf("expected failed, got %s", updated.Status)
+	}
+	if updated.FailureReason.String != "insufficient funds" {
+		t.Fatalf("expected failure reason to be recorded, got %q", updated.FailureReason.String)
+	}
+}
+
+func TestTick_BumpsAttemptOnStillPendingPhoneVerification(t *testing.T) {
+	dsn := getPG(t)
+	ctx := context.Background()
+	pool := newPool(t, dsn)
+	queries := db.New(pool)
+	v := seedPhoneVerification(t, ctx, queries, db.RequestStatusPending, "phone-ref-still-pending")
+
+	poller := &fakeStatusPoller{responses: map[string]*campay.TransactionStatusResponse{
+		"phone-ref-still-pending": {Reference: "phone-ref-still-pending", Status: "PENDING"},
+	}}
+	r := New(pool, queries, poller)
+	r.Tick(ctx)
+
+	updated, err := queries.GetLatestPhoneVerificationByUser(ctx, v.UserID)
+	if err != nil {
+		t.Fatalf("GetLatestPhoneVerificationByUser: %v", err)
+	}
+	if updated.AttemptCount != v.AttemptCount+1 {
+		t.Fatalf("expected attempt_count to increment, was %d now %d", v.AttemptCount, updated.AttemptCount)
+	}
+	if !updated.NextRetryAt.Valid {
+		t.Fatal("expected next_retry_at to be set for the next backoff step")
+	}
+}
+
+func TestTick_FlagsNeedsAdminReviewAfterMaxAttemptsPhoneVerification(t *testing.T) {
+	dsn := getPG(t)
+	ctx := context.Background()
+	pool := newPool(t, dsn)
+	queries := db.New(pool)
+	v := seedPhoneVerification(t, ctx, queries, db.RequestStatusPending, "phone-ref-stuck")
+
+	poller := &fakeStatusPoller{responses: map[string]*campay.TransactionStatusResponse{
+		"phone-ref-stuck": {Reference: "phone-ref-stuck", Status: "PENDING"},
+	}}
+	r := New(pool, queries, poller)
+
+	for i := 0; i < len(backoffLadder); i++ {
+		r.Tick(ctx)
+		if _, err := queries.UpdatePhoneVerificationReconcileAttempt(ctx, db.UpdatePhoneVerificationReconcileAttemptParams{
+			ID: v.ID, NextRetryAt: pgtype.Timestamptz{Time: time.Now().Add(-time.Minute), Valid: true}, NeedsAdminReview: false,
+		}); err != nil {
+			t.Fatalf("backdate: %v", err)
+		}
+	}
+	r.Tick(ctx)
+
+	updated, err := queries.GetLatestPhoneVerificationByUser(ctx, v.UserID)
+	if err != nil {
+		t.Fatalf("GetLatestPhoneVerificationByUser: %v", err)
+	}
+	if !updated.NeedsAdminReview {
+		t.Fatalf("expected needs_admin_review after %d attempts, attempt_count=%d", len(backoffLadder)+1, updated.AttemptCount)
+	}
+}
+
+func TestTick_NoRefPhoneVerificationAgesIntoAdminReviewAfterGracePeriod(t *testing.T) {
+	dsn := getPG(t)
+	ctx := context.Background()
+	pool := newPool(t, dsn)
+	queries := db.New(pool)
+	v := seedPhoneVerification(t, ctx, queries, db.RequestStatusInitiated, "")
+
+	// Backdate created_at itself past the 10-minute grace period.
+	if _, err := pool.Exec(ctx, `UPDATE phone_verifications SET created_at = NOW() - INTERVAL '11 minutes' WHERE id = $1`, v.ID); err != nil {
+		t.Fatalf("backdate created_at: %v", err)
+	}
+	if _, err := queries.UpdatePhoneVerificationReconcileAttempt(ctx, db.UpdatePhoneVerificationReconcileAttemptParams{
+		ID: v.ID, NextRetryAt: pgtype.Timestamptz{Time: time.Now().Add(-time.Minute), Valid: true}, NeedsAdminReview: false,
+	}); err != nil {
+		t.Fatalf("backdate next_retry_at: %v", err)
+	}
+
+	r := New(pool, queries, &fakeStatusPoller{})
+	r.Tick(ctx)
+
+	updated, err := queries.GetLatestPhoneVerificationByUser(ctx, v.UserID)
+	if err != nil {
+		t.Fatalf("GetLatestPhoneVerificationByUser: %v", err)
+	}
+	if !updated.NeedsAdminReview {
+		t.Fatal("expected no-ref phone verification past grace period to be flagged for admin review")
+	}
+}
+
+// TestGetActivePhoneVerificationByUser_UnblocksRetryAfter60Seconds is the
+// core of issue 8's fix: a phone verification stuck on a lost webhook must
+// not permanently 409-block AddPhoneNumber. Matches the frontend's own
+// canRetry heuristic (60s) in bohikor's account page.
+func TestGetActivePhoneVerificationByUser_UnblocksRetryAfter60Seconds(t *testing.T) {
+	dsn := getPG(t)
+	ctx := context.Background()
+	pool := newPool(t, dsn)
+	queries := db.New(pool)
+	v := seedPhoneVerification(t, ctx, queries, db.RequestStatusPending, "phone-ref-stale")
+
+	// Still fresh: counts as active, blocks a new attempt.
+	if _, err := queries.GetActivePhoneVerificationByUser(ctx, v.UserID); err != nil {
+		t.Fatalf("expected a fresh pending verification to be active, got: %v", err)
+	}
+
+	// Backdate past the 60s window.
+	if _, err := pool.Exec(ctx, `UPDATE phone_verifications SET created_at = NOW() - INTERVAL '61 seconds' WHERE id = $1`, v.ID); err != nil {
+		t.Fatalf("backdate created_at: %v", err)
+	}
+
+	if _, err := queries.GetActivePhoneVerificationByUser(ctx, v.UserID); err == nil {
+		t.Fatal("expected a stale (>60s) pending verification to no longer count as active")
 	}
 }

@@ -2,6 +2,7 @@ package reconciler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"time"
@@ -65,16 +66,26 @@ func (r *Reconciler) Run(ctx context.Context) {
 	}
 }
 
-// Tick processes every currently-reconcilable row once. Exported so the admin
-// force-reconcile endpoint and tests can drive it synchronously.
+// Tick processes every currently-reconcilable row once (advance requests,
+// then phone verifications). Exported so the admin force-reconcile endpoint
+// and tests can drive it synchronously.
 func (r *Reconciler) Tick(ctx context.Context) {
 	rows, err := r.queries.ListReconcilableAdvanceRequests(ctx)
 	if err != nil {
 		slog.Error("list reconcilable advance requests", "error", err)
+	} else {
+		for _, req := range rows {
+			r.reconcileOne(ctx, req)
+		}
+	}
+
+	phoneRows, err := r.queries.ListReconcilablePhoneVerifications(ctx)
+	if err != nil {
+		slog.Error("list reconcilable phone verifications", "error", err)
 		return
 	}
-	for _, req := range rows {
-		r.reconcileOne(ctx, req)
+	for _, v := range phoneRows {
+		r.reconcilePhoneVerificationOne(ctx, v)
 	}
 }
 
@@ -170,4 +181,117 @@ func (r *Reconciler) transition(ctx context.Context, req db.AdvanceRequest, newS
 	if err := tx.Commit(ctx); err != nil {
 		slog.Error("commit reconciler transition", "error", err, "request_id", req.ID)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Phone verifications — parallels the advance-request functions above.
+// Simpler than the payout path: phone verification never touches the
+// company ledger, so there's no service.TransitionRequest/transaction
+// needed, matching handlePhoneVerificationWebhook's (internal/handler/
+// advance.go) existing plain-update pattern for this resource.
+// ---------------------------------------------------------------------------
+
+func (r *Reconciler) reconcilePhoneVerificationOne(ctx context.Context, v db.PhoneVerification) {
+	if !v.CampayPayoutRef.Valid || v.CampayPayoutRef.String == "" {
+		r.handlePhoneVerificationNoRef(ctx, v)
+		return
+	}
+	r.pollAndTransitionPhoneVerification(ctx, v)
+}
+
+func (r *Reconciler) pollAndTransitionPhoneVerification(ctx context.Context, v db.PhoneVerification) {
+	status, err := r.campayClient.GetTransactionStatus(ctx, v.CampayPayoutRef.String)
+	if err != nil {
+		slog.Error("poll campay transaction status for phone verification", "error", err, "verification_id", v.ID)
+		r.bumpPhoneVerificationAttempt(ctx, v)
+		return
+	}
+
+	switch status.Status {
+	case "SUCCESSFUL":
+		r.transitionPhoneVerification(ctx, v, db.RequestStatusSuccess, "")
+	case "FAILED":
+		r.transitionPhoneVerification(ctx, v, db.RequestStatusFailed, status.Reason)
+	default:
+		r.bumpPhoneVerificationAttempt(ctx, v)
+	}
+}
+
+func (r *Reconciler) handlePhoneVerificationNoRef(ctx context.Context, v db.PhoneVerification) {
+	if time.Since(v.CreatedAt) < noRefGracePeriod {
+		return
+	}
+	if _, err := r.queries.UpdatePhoneVerificationReconcileAttempt(ctx, db.UpdatePhoneVerificationReconcileAttemptParams{
+		ID:               v.ID,
+		NextRetryAt:      pgtype.Timestamptz{Valid: false},
+		NeedsAdminReview: true,
+	}); err != nil {
+		slog.Error("flag no-ref phone verification for admin review", "error", err, "verification_id", v.ID)
+	}
+}
+
+func (r *Reconciler) bumpPhoneVerificationAttempt(ctx context.Context, v db.PhoneVerification) {
+	attempt := int(v.AttemptCount)
+	if attempt >= len(backoffLadder) {
+		if _, err := r.queries.UpdatePhoneVerificationReconcileAttempt(ctx, db.UpdatePhoneVerificationReconcileAttemptParams{
+			ID:               v.ID,
+			NextRetryAt:      pgtype.Timestamptz{Valid: false},
+			NeedsAdminReview: true,
+		}); err != nil {
+			slog.Error("flag phone verification for admin review after max attempts", "error", err, "verification_id", v.ID)
+		}
+		return
+	}
+
+	next := time.Now().Add(backoffLadder[attempt])
+	if _, err := r.queries.UpdatePhoneVerificationReconcileAttempt(ctx, db.UpdatePhoneVerificationReconcileAttemptParams{
+		ID:               v.ID,
+		NextRetryAt:      pgtype.Timestamptz{Time: next, Valid: true},
+		NeedsAdminReview: false,
+	}); err != nil {
+		slog.Error("bump phone verification reconcile attempt", "error", err, "verification_id", v.ID)
+	}
+}
+
+// transitionPhoneVerification mirrors handlePhoneVerificationWebhook's
+// success path (SetPhoneVerified + phone_verified audit event) so a
+// reconciler-driven resolution behaves identically to a late-arriving
+// webhook resolving the same row.
+func (r *Reconciler) transitionPhoneVerification(ctx context.Context, v db.PhoneVerification, newStatus db.RequestStatus, failureReason string) {
+	var reason pgtype.Text
+	if failureReason != "" {
+		reason = pgtype.Text{String: failureReason, Valid: true}
+	}
+	updated, err := r.queries.UpdatePhoneVerificationStatus(ctx, db.UpdatePhoneVerificationStatusParams{
+		ID:              v.ID,
+		Status:          newStatus,
+		FailureReason:   reason,
+		CampayPayoutRef: v.CampayPayoutRef,
+		UssdCode:        v.UssdCode,
+	})
+	if err != nil {
+		slog.Error("reconciler transition phone verification", "error", err, "verification_id", v.ID)
+		return
+	}
+
+	if newStatus != db.RequestStatusSuccess {
+		return
+	}
+
+	if _, err := r.queries.SetPhoneVerified(ctx, v.UserID); err != nil {
+		slog.Error("set phone verified from reconciler", "error", err, "user_id", v.UserID)
+		return
+	}
+
+	eventMeta, _ := json.Marshal(map[string]interface{}{
+		"verification_id": updated.ID.String(),
+		"phone_number":    updated.PhoneNumber,
+		"source":          "reconciler",
+	})
+	_, _ = r.queries.CreateEvent(ctx, db.CreateEventParams{
+		CompanyID: pgtype.UUID{Bytes: updated.CompanyID, Valid: true},
+		UserID:    pgtype.UUID{Bytes: updated.UserID, Valid: true},
+		EventType: "phone_verified",
+		Metadata:  eventMeta,
+	})
 }
