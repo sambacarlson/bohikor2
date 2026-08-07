@@ -19,6 +19,15 @@ import (
 
 var slugPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 
+// reservedSlugs are top-level static route segments under bohikor/src/app/
+// that a company slug must never collide with — currently just "platform"
+// (bohikor/src/app/platform/), which owns the platform-admin console at
+// /platform. A company created with this slug would be permanently
+// unreachable at /{slug}/login, shadowed by the static route.
+var reservedSlugs = map[string]bool{
+	"platform": true,
+}
+
 // platformStore is the data layer the platform (super-admin) handler needs.
 // CreateCompanyWithSettings is transactional (company row + seeded settings).
 type platformStore interface {
@@ -176,6 +185,10 @@ func (h *PlatformHandler) CreateCompany(c *gin.Context) {
 
 	if !slugPattern.MatchString(req.Slug) {
 		JSONError(c, http.StatusBadRequest, "invalid_slug", "slug must be lowercase alphanumeric words separated by hyphens")
+		return
+	}
+	if reservedSlugs[req.Slug] {
+		JSONError(c, http.StatusBadRequest, "reserved_slug", "this slug is reserved and cannot be used")
 		return
 	}
 

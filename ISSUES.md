@@ -207,7 +207,7 @@ were genuinely silent, including 5 `user_id`-type-assertion invariant violations
 internally on every path that reaches them. Also converted one stray `fmt.Printf("WARN: ...")` in
 `auth.go` (post-signup `AcceptInvitation` failure) to `slog.Warn`, same class of bug.
 
-## - [ ] 10. "platform" isn't reserved as a company slug; no slug-existence check before login renders
+## - [x] 10. "platform" isn't reserved as a company slug; no slug-existence check before login renders
 
 `slugPattern` (`internal/handler/platform.go:19`, mirrored in
 `bohikor/src/app/platform/(protected)/page.tsx:41`) is a character-format regex only — no reserved-
@@ -223,6 +223,15 @@ sqlc query (`db/sqlc/companies.sql.go:65`) used by the `create-admin` CLI, never
   instead of a login form when the slug doesn't resolve.
 
 **Verified 2026-08-07: still valid**, scope narrowed per user decision.
+
+**Resolved 2026-08-07 (#29):** `CreateCompany` now rejects a `reservedSlugs` blocklist (currently
+just `platform`) with 400 `reserved_slug`. Added a public `GET /api/companies/by-slug/:slug`
+(`internal/server/routes.go`'s `handleGetCompanyBySlug`, matching the existing inline-handler
+pattern used for `/me`) returning only `{slug, name}` — no balance/status/other data a logged-out
+visitor shouldn't see. Both `[company]/login` and `[company]/admin/login` now call it via a new
+`useCompanyBySlug` hook before rendering: a "Company not found" card replaces the login form for an
+unresolved slug, and as a side benefit (the data was already being fetched) the card title now
+shows the company's real name instead of the raw slug.
 
 ## - [ ] 11. Manage-company UI is missing admin visibility, copy-link affordances, and nav reorg
 

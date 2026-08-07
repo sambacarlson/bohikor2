@@ -5,6 +5,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { useParams, useRouter } from "next/navigation";
 import { useLogin } from "@/hooks/use-auth";
+import { useCompanyBySlug } from "@/hooks/use-company";
 import { setTokens, setSubjectHint } from "@/lib/auth";
 import { useAuth } from "@/components/providers";
 import { Button } from "@/components/ui/button";
@@ -25,6 +26,8 @@ export default function EmployeeLoginPage() {
   const router = useRouter();
   const { company } = useParams<{ company: string }>();
   const { user, refreshSubject } = useAuth();
+  const { data: companyInfo, isLoading: companyLoading, isError: companyNotFound } =
+    useCompanyBySlug(company);
   const login = useLogin();
   const [email, setEmail] = useState("");
   const [pin, setPin] = useState("");
@@ -81,6 +84,37 @@ export default function EmployeeLoginPage() {
     }
   };
 
+  if (companyLoading) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center bg-muted/50 p-4">
+        <div className="mb-6 flex flex-row items-center gap-2">
+          <Image src="/logo.png" alt="Bohikor" width={24} height={24} className="rounded-md" />
+          <span className="text-xs font-semibold tracking-wide text-muted-foreground">BOHIKOR</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (companyNotFound) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center bg-muted/50 p-4">
+        <div className="mb-6 flex flex-row items-center gap-2">
+          <Image src="/logo.png" alt="Bohikor" width={24} height={24} className="rounded-md" />
+          <span className="text-xs font-semibold tracking-wide text-muted-foreground">BOHIKOR</span>
+        </div>
+        <Card className="w-full max-w-md animate-fade-up py-6">
+          <CardHeader className="space-y-1 px-6">
+            <CardTitle className="font-heading text-2xl font-bold">Company not found</CardTitle>
+            <CardDescription>
+              We couldn&apos;t find a company at &ldquo;{company}&rdquo;. Check the link your
+              employer sent you, or contact them for the correct sign-in page.
+            </CardDescription>
+          </CardHeader>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-muted/50 p-4">
       <div className="mb-6 flex flex-row items-center gap-2">
@@ -90,7 +124,7 @@ export default function EmployeeLoginPage() {
 
       <Card className="w-full max-w-md animate-fade-up py-6">
         <CardHeader className="space-y-1 px-6">
-          <CardTitle className="font-heading text-2xl font-bold">{company}</CardTitle>
+          <CardTitle className="font-heading text-2xl font-bold">{companyInfo?.name ?? company}</CardTitle>
           <CardDescription>Sign in with your email and PIN</CardDescription>
         </CardHeader>
         <CardContent className="px-6">

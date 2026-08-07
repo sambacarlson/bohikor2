@@ -21,6 +21,10 @@ jest.mock("@/lib/api", () => ({
   },
 }));
 
+jest.mock("@/hooks/use-company", () => ({
+  useCompanyBySlug: jest.fn(),
+}));
+
 jest.mock("@/lib/auth", () => ({
   setTokens: jest.fn(),
   setSubjectHint: jest.fn(),
@@ -28,6 +32,7 @@ jest.mock("@/lib/auth", () => ({
 
 const { useAuth } = jest.requireMock("@/components/providers");
 const { api } = jest.requireMock("@/lib/api");
+const { useCompanyBySlug } = jest.requireMock("@/hooks/use-company");
 const { setTokens, setSubjectHint } = jest.requireMock("@/lib/auth");
 
 describe("AdminLoginPage", () => {
@@ -39,6 +44,11 @@ describe("AdminLoginPage", () => {
       loading: false,
       signOut: jest.fn(),
       refreshSubject: mockRefreshSubject,
+    });
+    useCompanyBySlug.mockReturnValue({
+      data: { slug: "acme", name: "acme" },
+      isLoading: false,
+      isError: false,
     });
   });
 
@@ -152,5 +162,22 @@ describe("AdminLoginPage", () => {
     expect(
       screen.getByText("Invalid email or password")
     ).toBeInTheDocument();
+  });
+
+  it("does not render the login form while the company slug is still resolving", () => {
+    useCompanyBySlug.mockReturnValue({ data: undefined, isLoading: true, isError: false });
+
+    render(<AdminLoginPage />);
+
+    expect(screen.queryByLabelText(/email/i)).not.toBeInTheDocument();
+  });
+
+  it("shows a 'company not found' message instead of the login form for an unknown slug", () => {
+    useCompanyBySlug.mockReturnValue({ data: undefined, isLoading: false, isError: true });
+
+    render(<AdminLoginPage />);
+
+    expect(screen.getByText("Company not found")).toBeInTheDocument();
+    expect(screen.queryByLabelText(/email/i)).not.toBeInTheDocument();
   });
 });

@@ -15,6 +15,34 @@ type userQuerier interface {
 	GetUserByID(ctx context.Context, id uuid.UUID) (db.User, error)
 }
 
+type companyBySlugQuerier interface {
+	GetCompanyBySlug(ctx context.Context, slug string) (db.Company, error)
+}
+
+// handleGetCompanyBySlug is public/unauthenticated (issue 10: the frontend
+// login page needs to know whether a {company} slug is real before
+// rendering a login form, rather than always showing one regardless).
+// Returns only slug+name — no balance, status, or other data a logged-out
+// visitor shouldn't see.
+func handleGetCompanyBySlug(q companyBySlugQuerier) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		company, err := q.GetCompanyBySlug(c.Request.Context(), c.Param("slug"))
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error": "company not found",
+			})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"data": gin.H{
+				"slug": company.Slug,
+				"name": company.Name,
+			},
+		})
+	}
+}
+
 func handleUserMe(q userQuerier) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		subjectIDStr := c.GetString("subject_id")

@@ -87,6 +87,7 @@ func New(cfg *config.Config) (*Server, error) {
 	authMiddleware := middleware.JWTAuth(tokenService)
 
 	router.GET("/health", healthHandler)
+	router.GET("/api/companies/by-slug/:slug", handleGetCompanyBySlug(queries))
 
 	authHandler := handler.NewAuthHandler(
 		queries, tokenService, hasher, emailClient, 30*24*time.Hour,

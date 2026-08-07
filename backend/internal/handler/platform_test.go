@@ -181,6 +181,28 @@ func TestCreateCompany_InvalidSlug(t *testing.T) {
 	}
 }
 
+// A company slugged "platform" would be permanently unreachable at
+// /platform/login, shadowed by the static platform-admin console route.
+func TestCreateCompany_ReservedSlug(t *testing.T) {
+	store := &mockPlatformStore{}
+	h := NewPlatformHandler(store, stubHasher{})
+	r := platformGin(store)
+	r.POST("/api/platform/companies", h.CreateCompany)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequestWithContext(context.Background(), "POST", "/api/platform/companies",
+		strings.NewReader(`{"slug":"platform","name":"Sneaky Co"}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+	if store.seededCompany {
+		t.Fatal("reserved slug must not create a company")
+	}
+}
+
 func TestCreateCompanyAdmin_ScopedToCompany(t *testing.T) {
 	companyID := uuid.New()
 	store := &mockPlatformStore{}

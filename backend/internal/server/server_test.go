@@ -61,6 +61,54 @@ func (q *testQuerier) GetPlatformAdminByID(ctx context.Context, id uuid.UUID) (d
 	return db.PlatformAdmin{}, errNotFound
 }
 
+type companySlugQuerier struct {
+	company *db.Company
+}
+
+func (q *companySlugQuerier) GetCompanyBySlug(ctx context.Context, slug string) (db.Company, error) {
+	if q.company == nil || q.company.Slug != slug {
+		return db.Company{}, errNotFound
+	}
+	return *q.company, nil
+}
+
+func TestGetCompanyBySlug_Found(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	q := &companySlugQuerier{company: &db.Company{ID: uuid.New(), Slug: "acme", Name: "Acme Inc"}}
+	r := gin.New()
+	r.GET("/api/companies/by-slug/:slug", handleGetCompanyBySlug(q))
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequestWithContext(context.Background(), "GET", "/api/companies/by-slug/acme", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp["data"]["slug"] != "acme" || resp["data"]["name"] != "Acme Inc" {
+		t.Fatalf("unexpected response: %v", resp)
+	}
+}
+
+func TestGetCompanyBySlug_NotFound(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	q := &companySlugQuerier{}
+	r := gin.New()
+	r.GET("/api/companies/by-slug/:slug", handleGetCompanyBySlug(q))
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequestWithContext(context.Background(), "GET", "/api/companies/by-slug/nope", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", w.Code)
+	}
+}
+
 func makeToken(svc authjwt.TokenService, subjectID, subjectType, companyID string) string {
 	token, err := svc.GenerateAccessToken(subjectID, subjectType, companyID)
 	if err != nil {
