@@ -2,10 +2,12 @@ package server
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"strings"
 	"testing"
 	"time"
@@ -202,10 +204,15 @@ func TestUserMeEndpoint_SuspendedUser(t *testing.T) {
 func TestUserMeEndpoint_ActiveUser(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	userID := uuid.New()
+	consentIP := netip.MustParseAddr("1.2.3.4")
 	q := &testQuerier{
 		user: &db.User{
 			ID: userID, CompanyID: testCompany, Email: "user@test.com",
-			Status: db.UserStatusActive,
+			Status:              db.UserStatusActive,
+			PinHash:             pgtype.Text{String: "$2a$10$secrethash", Valid: true},
+			FailedLoginAttempts: 2,
+			LockedUntil:         sql.NullTime{Time: time.Now(), Valid: true},
+			UserIpAtConsent:     &consentIP,
 		},
 	}
 	svc := authjwt.NewHS256Service("test-secret", 15*time.Minute)
@@ -222,6 +229,13 @@ func TestUserMeEndpoint_ActiveUser(t *testing.T) {
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if strings.Contains(w.Body.String(), "secrethash") ||
+		strings.Contains(w.Body.String(), "pin_hash") ||
+		strings.Contains(w.Body.String(), "failed_login_attempts") ||
+		strings.Contains(w.Body.String(), "locked_until") ||
+		strings.Contains(w.Body.String(), "user_ip_at_consent") {
+		t.Fatalf("response leaked pin hash or lockout fields: %s", w.Body.String())
 	}
 
 	var resp map[string]interface{}

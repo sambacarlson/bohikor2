@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	db "github.com/Iknite-Space/bohikor2/db/sqlc"
+	"github.com/Iknite-Space/bohikor2/internal/handler"
 )
 
 type userQuerier interface {
@@ -35,7 +36,7 @@ func handleUserMe(q userQuerier) gin.HandlerFunc {
 		}
 
 		c.JSON(http.StatusOK, gin.H{
-			"data": user,
+			"data": handler.SanitizeUser(user),
 		})
 	}
 }

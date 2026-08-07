@@ -232,7 +232,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"data": gin.H{
-			"user":          sanitizeUser(user),
+			"user":          SanitizeUser(user),
 			"company_slug":  company.Slug,
 			"access_token":  tokens.AccessToken,
 			"refresh_token": tokens.RefreshToken,
@@ -326,7 +326,7 @@ func (h *AuthHandler) CreatePin(c *gin.Context) {
 
 	c.JSON(http.StatusCreated, gin.H{
 		"data": gin.H{
-			"user":          sanitizeUser(user),
+			"user":          SanitizeUser(user),
 			"access_token":  tokens.AccessToken,
 			"refresh_token": tokens.RefreshToken,
 			"expires_in":    tokens.ExpiresIn,
@@ -523,7 +523,7 @@ func (h *AuthHandler) VerifyEmailOTP(c *gin.Context) {
 
 		c.JSON(http.StatusOK, gin.H{
 			"data": gin.H{
-				"user":          sanitizeUser(user),
+				"user":          SanitizeUser(user),
 				"access_token":  tokens.AccessToken,
 				"refresh_token": tokens.RefreshToken,
 				"expires_in":    tokens.ExpiresIn,
@@ -797,7 +797,9 @@ func sanitizeAdmin(admin db.Admin) gin.H {
 	}
 }
 
-func sanitizeUser(user db.User) gin.H {
+// SanitizeUser strips pin_hash, failed_login_attempts, locked_until, and
+// user_ip_at_consent before a user record goes into a response body.
+func SanitizeUser(user db.User) gin.H {
 	return gin.H{
 		"id":                user.ID,
 		"email":             user.Email,
