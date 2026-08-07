@@ -183,6 +183,11 @@ Before pushing a backend change that touches Docker, build config, or migrations
 
 4. **Audit `.gitignore`** — confirm it only excludes truly ephemeral files (`.env`, `node_modules`, binaries). Never exclude build-time dependencies (generated code, SQL files, config templates).
 
+5. **Verify `FRONTEND_BASE_URL` is set to the real deployed frontend URL** in the production
+   environment (Render). `config.Load()` fails startup if it's unset in production, but a stale or
+   wrong value (e.g. still pointing at a preview URL) will pass that check and silently break every
+   invitation email's signup link.
+
 ## Rules
 
 - **NEVER auto-commit changes.** Always wait for explicit user instruction to commit.

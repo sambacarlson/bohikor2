@@ -29,8 +29,11 @@ type Config struct {
 	FromEmail    string `env:"FROM_EMAIL" envDefault:"onboarding@resend.dev"`
 
 	// Frontend (bohikor/) base URL, used to build links embedded in emails
-	// (e.g. the invitation email's /{company}/signup?email=... link).
-	FrontendBaseURL string `env:"FRONTEND_BASE_URL" envDefault:"http://localhost:3000"`
+	// (e.g. the invitation email's /{company}/signup?email=... link). No
+	// envDefault: Load() only falls back to localhost outside production, so
+	// a missing value fails loudly instead of silently producing broken
+	// invite links in production (see AGENTS.md's deploy checklist).
+	FrontendBaseURL string `env:"FRONTEND_BASE_URL"`
 
 	// Timezone
 	Timezone string `env:"TIMEZONE" envDefault:"Africa/Douala"`
@@ -51,6 +54,13 @@ func Load() (*Config, error) {
 
 	if cfg.DatabaseURL == "" {
 		return nil, fmt.Errorf("DATABASE_URL is required")
+	}
+
+	if cfg.FrontendBaseURL == "" {
+		if cfg.IsProduction() {
+			return nil, fmt.Errorf("FRONTEND_BASE_URL is required in production")
+		}
+		cfg.FrontendBaseURL = "http://localhost:3000"
 	}
 
 	return cfg, nil

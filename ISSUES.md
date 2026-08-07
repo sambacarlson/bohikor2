@@ -67,7 +67,7 @@ fully-qualified `pg_catalog.numeric`), so the project's stated `numeric` → `de
 mapping had silently never applied to anything — unrelated dead config, now replaced. Frontend
 needed no changes; `amount_xaf` was already typed `string` there.
 
-## - [ ] 4. `FRONTEND_BASE_URL` defaults to `localhost`, breaking invite emails in production
+## - [x] 4. `FRONTEND_BASE_URL` defaults to `localhost`, breaking invite emails in production
 
 `backend/internal/config/config.go:33` defaults `FrontendBaseURL` to `http://localhost:3000` with
 no required-value validation (unlike `DatabaseURL`, `config.go:52-54`). Used in
@@ -82,6 +82,11 @@ was a duplicate bullet buried in the old "manage company form" mega-issue — sa
 value (fail loudly at startup) rather than silently defaulting in non-dev environments.
 
 **Verified 2026-08-07: still valid.**
+
+**Resolved 2026-08-07 (#24):** removed the `envDefault` from `FrontendBaseURL`; `config.Load()` now
+falls back to `http://localhost:3000` outside production but returns a startup error if it's unset
+in production. Added a pre-push checklist item to `AGENTS.md` reminding to verify the Render value
+is the real deployed URL (the code only catches "unset," not "set to a stale/wrong URL").
 
 ## - [ ] 5. Account/OTP lockout has no IP or device throttling — enables targeted DOS
 
